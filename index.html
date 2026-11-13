@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Spookie</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0714; overscroll-behavior: none; }
+  body { touch-action: none; -webkit-user-select: none; user-select: none; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  canvas { display: block; }
+  #title {
+    position: fixed; top: 14px; left: 0; right: 0; text-align: center; pointer-events: none;
+    color: #ff9a3c; font-size: 20px; letter-spacing: 6px; text-shadow: 0 0 12px #ff6a00;
+  }
+  #hint {
+    position: fixed; bottom: 14px; left: 0; right: 0; text-align: center; pointer-events: none;
+    color: #8f86b8; font-size: 12px; transition: opacity 1.5s;
+  }
+  #stick {
+    position: fixed; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%;
+    border: 2px solid rgba(255,154,60,.45); background: rgba(255,154,60,.08);
+    display: none; pointer-events: none;
+  }
+  #knob {
+    position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px;
+    border-radius: 50%; background: rgba(255,154,60,.55); box-shadow: 0 0 14px rgba(255,106,0,.6);
+  }
+</style>
+</head>
+<body>
+<div id="title">SPOOKIE</div>
+<div id="hint">WASD / arrow keys to move &middot; or touch &amp; drag anywhere</div>
+<div id="stick"><div id="knob"></div></div>
+<script type="importmap">{ "imports": { "three": "./lib/three.module.js" } }</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
