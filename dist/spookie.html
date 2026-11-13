@@ -54011,7 +54011,7 @@ function updateQuests(dt, t) {
   if (toastT > 0 && (toastT -= dt) <= 0) ui.toast.classList.remove('on');
 }
 renderQuestHud();
-window.__spookie = { pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+window.__spookie = { ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -54024,18 +54024,30 @@ dispatchEvent(new Event('resize'));
 
 const clock = new THREE.Clock();
 const SPEED = 6;
+const GHOST_SLOW = 0.4, GHOST_SLOW_TIME = 2, GHOST_HIT_R = 0.9; // walking through a ghost slows you for 2s
+let slowT = 0;
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
 
   // movement (screen-up = world -z)
+  if (world === 'outside') for (const g of ghosts) {
+    if (Math.hypot(g.position.x - pPos.x, g.position.z - pPos.y) < GHOST_HIT_R) {
+      if (slowT <= 0) toast('A cold chill... you are slowed!');
+      slowT = GHOST_SLOW_TIME;
+    }
+  }
+  const slowed = slowT > 0;
+  if (slowed) slowT -= dt;
+  M.cloak.emissive.setHex(slowed ? 0x3a6bff : 0x000000); M.cloak.emissiveIntensity = slowed ? 0.7 : 0;
+  const speed = SPEED * (slowed ? GHOST_SLOW : 1);
   const [ix, iy] = readInput(), mag = Math.hypot(ix, iy);
   if (mag > 0) {
-    pPos.x += ix * SPEED * dt;
-    pPos.y += iy * SPEED * dt;
+    pPos.x += ix * speed * dt;
+    pPos.y += iy * speed * dt;
     const target = Math.atan2(ix, iy);
     let d = target - facing; d = Math.atan2(Math.sin(d), Math.cos(d));
     facing += d * Math.min(1, dt * 14);
-    walkT += dt * 11 * mag;
+    walkT += dt * 11 * mag * (slowed ? GHOST_SLOW : 1);
   }
   // collisions
   for (const c of world === 'house' ? houseColliders : colliders) {
