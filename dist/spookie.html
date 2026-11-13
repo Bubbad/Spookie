@@ -53247,6 +53247,83 @@ function ghost() {
   return g;
 }
 
+// ---------- campfire with people ----------
+const FIRE = { x: 8, z: 6 };
+const flames = [], embers = [];
+{
+  const fy = heightAt(FIRE.x, FIRE.z);
+  const fire = new THREE.Group();
+  fire.position.set(FIRE.x, fy, FIRE.z);
+  // stone ring
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2, s = rr(0.22, 0.32);
+    const st = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), M.stone);
+    st.position.set(Math.cos(a) * 0.95, s * 0.5, Math.sin(a) * 0.95);
+    st.rotation.set(rnd() * 3, rnd() * 3, rnd() * 3);
+    fire.add(st);
+  }
+  // crossed logs
+  for (let i = 0; i < 3; i++) {
+    const log = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 1.3, 5), M.bark);
+    log.rotation.order = 'YXZ';
+    log.rotation.set(Math.PI / 2 - 0.3, (i / 3) * Math.PI, 0);
+    log.position.y = 0.2;
+    fire.add(log);
+  }
+  // flames (layered cones)
+  const flameCols = [0xff3d00, 0xff8a00, 0xffd23f];
+  flameCols.forEach((c, i) => {
+    const f = new THREE.Mesh(new THREE.ConeGeometry(0.42 - i * 0.1, 1.4 - i * 0.3, 5), new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.92 }));
+    f.position.y = 0.7 + (1.4 - i * 0.3) / 2 - 0.3;
+    f.userData = { ph: i * 1.7, base: f.position.y, i };
+    fire.add(f); flames.push(f);
+  });
+  // glowing embers drifting up
+  const emGeo = new THREE.OctahedronGeometry(0.04, 0), emMat = new THREE.MeshBasicMaterial({ color: 0xffa040 });
+  for (let i = 0; i < 18; i++) {
+    const e = new THREE.Mesh(emGeo, emMat);
+    e.userData = { t: rnd() * 3, sp: rr(0.5, 1.1), a: rnd() * 6.28, r: rr(0.1, 0.4) };
+    fire.add(e); embers.push(e);
+  }
+  const fl = new THREE.PointLight(0xff7a22, 7, 20, 1.4);
+  fl.position.y = 1.3; fl.userData.base = 7;
+  flickers.push(fl);
+  fire.add(fl);
+  scene.add(fire);
+  colliders.push({ x: FIRE.x, z: FIRE.z, r: 1.2 });
+
+  // people sitting around it on logs
+  const cloakCols = [0x7a2e3b, 0x2e5a7a, 0x4d6b2e, 0x6b4a2e, 0x5b3a7a];
+  const skinCols = [0xe9d6c0, 0xc99a73, 0x8d5a3b, 0xf0cfae, 0xa8744f];
+  const seats = 5;
+  for (let i = 0; i < seats; i++) {
+    const a = (i / seats) * Math.PI * 2 + 0.4, d = 2.5;
+    const sx = FIRE.x + Math.cos(a) * d, sz = FIRE.z + Math.sin(a) * d;
+    const p = new THREE.Group();
+    p.position.set(sx, heightAt(sx, sz), sz);
+    p.rotation.y = Math.atan2(FIRE.x - sx, FIRE.z - sz); // face the fire
+    const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 1, 6), M.bark);
+    seat.rotation.z = Math.PI / 2; seat.position.y = 0.22;
+    const cm = mat(cloakCols[i]);
+    const torso = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.8, 6), cm);
+    torso.position.set(0, 0.7, -0.05);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 6, 5), mat(skinCols[i]));
+    head.position.y = 1.2;
+    const hood = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.35, 6), cm);
+    hood.position.y = 1.38;
+    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.14, 0.5), cm);
+    legs.position.set(0, 0.42, 0.28);
+    const hands = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.08, 0.2), mat(skinCols[i]));
+    hands.position.set(0, 0.68, 0.42);
+    p.add(seat, torso, head, hood, legs, hands);
+    p.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    p.userData.ph = rnd() * 6.28;
+    scene.add(p);
+    colliders.push({ x: sx, z: sz, r: 0.6 });
+    (globalThis.sitters ||= []).push(p);
+  }
+}
+
 // graveyard patch near the middle-ish, trees around, pumpkins scattered
 for (let i = 0; i < 16; i++) { // tombstones in a cluster
   const a = rnd() * 6.28, d = Math.sqrt(rr(16, 90));
@@ -53411,6 +53488,20 @@ function tick() {
 
   // flicker
   for (const l of flickers) l.intensity = l.userData.base * (0.85 + Math.sin(t * 11 + l.id) * 0.07 + Math.sin(t * 23 + l.id * 3) * 0.06);
+
+  // fire animation
+  for (const f of flames) {
+    const u = f.userData, k = 1 + Math.sin(t * 9 + u.ph) * 0.12 + Math.sin(t * 17 + u.ph) * 0.08;
+    f.scale.set(1 + Math.sin(t * 7 + u.ph) * 0.08, k, 1 + Math.cos(t * 8 + u.ph) * 0.08);
+    f.rotation.y = t * (1 + u.i);
+  }
+  for (const e of embers) {
+    const u = e.userData; u.t += dt * u.sp;
+    if (u.t > 2.5) { u.t = 0; u.a = rnd() * 6.28; }
+    e.position.set(Math.cos(u.a + u.t) * (u.r + u.t * 0.15), 0.5 + u.t * 1.1, Math.sin(u.a + u.t) * (u.r + u.t * 0.15));
+    e.scale.setScalar(Math.max(0.1, 1 - u.t / 2.5));
+  }
+  for (const p of globalThis.sitters || []) p.children[3].rotation.z = Math.sin(t * 0.8 + p.userData.ph) * 0.05;
 
   // ghosts + wisps
   for (const g of ghosts) {
