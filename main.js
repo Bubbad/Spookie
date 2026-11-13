@@ -8,11 +8,12 @@ const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a
 
 const WORLD_R = 30;       // island radius
 const WALK_R = 27;        // how far the player can walk
+const HOUSE = { x: -11, z: 10, hw: 3, hd: 2.5 }; // blacksmith house (door faces +z)
 
 // gentle rolling hills
 function heightAt(x, z) {
   const h = Math.sin(x * 0.21) * Math.cos(z * 0.17) * 0.8 + Math.sin(x * 0.07 + z * 0.09) * 0.9;
-  return h * smooth(2, 8, Math.hypot(x, z)); // keep spawn flat
+  return h * smooth(2, 8, Math.hypot(x, z)) * smooth(5, 9, Math.hypot(x - HOUSE.x, z - HOUSE.z)); // keep spawn + house flat
 }
 
 // ---------- renderer / scene ----------
@@ -86,7 +87,9 @@ function buildTerrain() {
 buildTerrain();
 
 // ---------- props ----------
-const colliders = []; // {x, z, r}
+const colliders = []; // circle {x, z, r} or box {x, z, hw, hd}
+const interactables = []; // {world, getPos, r, label, act}
+const avoid = [{ x: HOUSE.x, z: HOUSE.z + HOUSE.hd + 3, r: 3.2 }]; // keep props off the porch
 const flickers = [];  // lights that flicker
 const bobbers = [];   // floating things
 
@@ -100,7 +103,7 @@ const spot = (minR = 4, maxR = WORLD_R - 3) => {
   for (;;) {
     const a = rnd() * Math.PI * 2, d = Math.sqrt(rr(minR * minR, maxR * maxR));
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
-    if (colliders.every(c => Math.hypot(c.x - x, c.z - z) > c.r + 1.4)) return [x, z];
+    if (colliders.every(c => Math.hypot(c.x - x, c.z - z) > c.r + 1.4) && avoid.every(c => Math.hypot(c.x - x, c.z - z) > c.r)) return [x, z];
   }
 };
 
@@ -250,6 +253,228 @@ let fireBoost = 1; // grows when the quest is completed
   }
 }
 
+// ---------- blacksmith house ----------
+const houseScene = new THREE.Scene();
+houseScene.background = new THREE.Color(0x0b0710);
+const houseColliders = [];
+const HOUSE_BOUNDS = { x0: -4.6, x1: 4.6, z0: -3.5, z1: 3.7 };
+const smoke = [], houseFlames = [], sparks = [];
+const smith = { group: null, arm: null, k: 0, talked: false };
+const ANVIL_POS = { x: 0, z: 0 }, SMITH_POS = { x: 1.35, z: 0 };
+
+const metal = mat(0x3a3d4a, { metalness: 0.3, roughness: 0.6 });
+const steel = mat(0xaab2c5, { metalness: 0.3, roughness: 0.5 });
+const woodDark = mat(0x3b2619), woodMid = mat(0x5a3b24);
+const glowOrange = new THREE.MeshBasicMaterial({ color: 0xff7a22 });
+function box(w, h, d, m, x, y, z, parent) {
+  const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+  o.position.set(x, y, z); parent.add(o); return o;
+}
+function cyl(rt, rb, h, seg, m, x, y, z, parent) {
+  const o = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), m);
+  o.position.set(x, y, z); parent.add(o); return o;
+}
+function makeAnvil() {
+  const a = new THREE.Group();
+  cyl(0.5, 0.58, 0.5, 8, M.bark, 0, 0.25, 0, a); // stump
+  box(0.8, 0.3, 0.5, metal, 0, 0.65, 0, a);
+  box(0.5, 0.3, 0.34, metal, 0, 0.95, 0, a);
+  box(1.1, 0.2, 0.5, mat(0x4a4e5e, { metalness: 0.3, roughness: 0.5 }), 0, 1.2, 0, a);
+  const horn = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.7, 6), metal);
+  horn.rotation.z = Math.PI / 2; horn.position.set(-0.85, 1.2, 0); a.add(horn);
+  box(0.4, 0.07, 0.14, glowOrange, 0.05, 1.33, 0, a); // hot iron
+  return a;
+}
+
+// --- exterior ---
+{
+  const h = new THREE.Group();
+  const wall = mat(0x4a3426), roofM = mat(0x2d2745), doorM = mat(0x2a170f);
+  box(6.4, 0.7, 5.4, M.stone, 0, 0, 0, h);
+  box(6, 2.4, 5, wall, 0, 1.5, 0, h);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(0.35, 2.6, 0.35, woodDark, sx * 3, 1.5, sz * 2.5, h);
+  const roofG = new THREE.Group();
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(4.9, 2.3, 4), roofM);
+  roof.rotation.y = Math.PI / 4; roofG.add(roof); roofG.scale.set(1, 1, 0.8); roofG.position.y = 3.85; h.add(roofG);
+  box(0.8, 2.6, 0.8, M.stone, 1.9, 3.7, -1.2, h);        // chimney
+  box(0.5, 0.1, 0.5, glowOrange, 1.9, 5.02, -1.2, h);
+  // door + frame
+  box(1.3, 1.9, 0.14, doorM, 0, 1.25, 2.55, h);
+  box(1.6, 0.15, 0.2, woodDark, 0, 2.28, 2.55, h);
+  box(0.15, 2.1, 0.2, woodDark, -0.75, 1.25, 2.55, h);
+  box(0.15, 2.1, 0.2, woodDark, 0.75, 1.25, 2.55, h);
+  box(1.3, 0.1, 0.16, metal, 0, 0.8, 2.58, h);
+  box(1.3, 0.1, 0.16, metal, 0, 1.7, 2.58, h);
+  box(1.8, 0.12, 0.7, M.stone, 0, 0, 3.05, h);           // step
+  // glowing windows
+  const winM = new THREE.MeshBasicMaterial({ color: 0xffa347 });
+  for (const sx of [-2, 2]) {
+    box(1.05, 0.85, 0.08, woodDark, sx, 1.7, 2.49, h);
+    box(0.9, 0.7, 0.1, winM, sx, 1.7, 2.52, h);
+    box(0.06, 0.7, 0.12, woodDark, sx, 1.7, 2.55, h);
+    box(0.9, 0.06, 0.12, woodDark, sx, 1.7, 2.55, h);
+  }
+  // hanging sign with an anvil icon
+  box(1.0, 0.5, 0.06, woodDark, 1.7, 2.45, 2.62, h);
+  box(0.5, 0.1, 0.07, steel, 1.7, 2.5, 2.66, h);
+  box(0.2, 0.14, 0.07, steel, 1.7, 2.4, 2.66, h);
+  box(0.25, 0.32, 0.25, M.lantern, -1.1, 1.9, 2.68, h);  // door lantern
+  const dl = new THREE.PointLight(0xff9a3c, 14, 11, 1.4);
+  dl.position.set(0, 2.4, 3.8); dl.userData.base = 14; flickers.push(dl); h.add(dl);
+  // chimney smoke
+  for (let i = 0; i < 6; i++) {
+    const p = new THREE.Mesh(new THREE.IcosahedronGeometry(0.3, 0), new THREE.MeshBasicMaterial({ color: 0x8a8499, transparent: true, opacity: 0.3, depthWrite: false }));
+    p.userData = { t: i / 6, ph: rnd() * 6.28 }; h.add(p); smoke.push(p);
+  }
+  place(h, HOUSE.x, HOUSE.z, 0);
+  colliders.push({ x: HOUSE.x, z: HOUSE.z, hw: HOUSE.hw + 0.05, hd: HOUSE.hd + 0.05, r: 4.4 });
+  interactables.push({ world: 'outside', getPos: () => ({ x: HOUSE.x, z: HOUSE.z + HOUSE.hd + 0.8 }), r: 1.9, label: 'ENTER', act: () => switchWorld('house') });
+}
+
+// --- interior ---
+{
+  const hs = houseScene;
+  hs.add(new THREE.HemisphereLight(0x7a6a9a, 0x2a1810, 0.55));
+  // floor planks
+  const plankCols = [0x5a3b24, 0x4d321f, 0x654328, 0x56391f];
+  for (let i = -5; i < 5; i++) box(0.98, 0.1, 8.6, mat(plankCols[(i + 5) % 4]), i + 0.5, -0.05, 0, hs);
+  box(3.2, 0.02, 2.4, mat(0x5a1f1f), 0.6, 0.01, 0.2, hs); // rug
+  // walls (south wall is low so the camera sees in, with a doorway)
+  box(10.8, 3, 0.4, woodMid, 0, 1.5, -4.2, hs);
+  box(0.4, 3, 8.8, woodMid, -5.2, 1.5, 0, hs);
+  box(0.4, 3, 8.8, woodMid, 5.2, 1.5, 0, hs);
+  box(4.5, 0.6, 0.4, woodMid, -3.05, 0.3, 4.2, hs);
+  box(4.5, 0.6, 0.4, woodMid, 3.05, 0.3, 4.2, hs);
+  box(0.2, 1.6, 0.3, woodDark, -0.85, 0.8, 4.2, hs);
+  box(0.2, 1.6, 0.3, woodDark, 0.85, 0.8, 4.2, hs);
+  box(1.9, 0.05, 1.4, mat(0x1d2440), 0, 0.0, 4.9, hs); // moonlit doorway
+  const outside = new THREE.PointLight(0x7080ff, 3, 8); outside.position.set(0, 1.5, 5.2); hs.add(outside);
+
+  // forge (west wall)
+  const forge = new THREE.Group(); forge.position.set(-3.7, 0, -2.8);
+  box(2.2, 1.0, 1.6, M.stone, 0, 0.5, 0, forge);
+  box(1.8, 0.12, 1.2, mat(0x551100, { emissive: 0xff3300, emissiveIntensity: 1.5 }), 0, 1.04, 0, forge);
+  box(1.4, 2.6, 0.6, M.stone, 0, 2.3, -0.65, forge); // hood / chimney
+  [0xff3d00, 0xff8a00, 0xffd23f].forEach((c, i) => {
+    const f = new THREE.Mesh(new THREE.ConeGeometry(0.34 - i * 0.08, 0.9 - i * 0.2, 5), new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.92 }));
+    f.position.set((i - 1) * 0.35, 1.5 - i * 0.05, 0); f.userData = { ph: i * 1.9, y: f.position.y }; forge.add(f); houseFlames.push(f);
+  });
+  hs.add(forge);
+  const fl = new THREE.PointLight(0xff6a1a, 32, 15, 1.2); fl.position.set(-3.3, 1.9, -2.4); fl.userData.base = 32; flickers.push(fl); hs.add(fl);
+  houseColliders.push({ x: -3.7, z: -2.8, hw: 1.15, hd: 0.85 });
+
+  // barrels, crates, workbench
+  for (const [x, z] of [[-4.2, 1.5], [-3.5, 2.5]]) {
+    cyl(0.42, 0.38, 0.9, 8, woodMid, x, 0.45, z, hs); cyl(0.44, 0.44, 0.06, 8, metal, x, 0.6, z, hs);
+    houseColliders.push({ x, z, r: 0.45 });
+  }
+  box(0.9, 0.8, 0.9, woodDark, 3.9, 0.4, 2.8, hs); box(0.7, 0.6, 0.7, woodMid, 3.0, 0.3, 3.2, hs); box(0.7, 0.5, 0.7, woodDark, 3.95, 1.05, 2.8, hs);
+  houseColliders.push({ x: 3.9, z: 2.8, hw: 0.5, hd: 0.5 }, { x: 3.0, z: 3.2, hw: 0.4, hd: 0.4 });
+  const bench = new THREE.Group(); bench.position.set(4.3, 0, -0.6);
+  box(1.0, 0.1, 3, woodMid, 0, 0.95, 0, bench); box(0.1, 0.95, 2.8, woodDark, -0.4, 0.47, 0, bench); box(0.1, 0.95, 2.8, woodDark, 0.4, 0.47, 0, bench);
+  box(0.12, 0.08, 0.7, steel, 0.1, 1.04, -0.8, bench); box(0.1, 0.06, 0.6, steel, -0.1, 1.03, 0.2, bench);
+  box(0.25, 0.14, 0.2, metal, 0.05, 1.07, 0.9, bench);
+  hs.add(bench);
+  houseColliders.push({ x: 4.3, z: -0.6, hw: 0.55, hd: 1.55 });
+
+  // weapons on the north wall
+  box(3.4, 0.14, 0.1, woodDark, 2.2, 1.9, -3.95, hs);
+  for (let i = 0; i < 5; i++) {
+    const x = 0.9 + i * 0.65, bl = 1.1 + (i % 2) * 0.2;
+    box(0.08, bl, 0.03, steel, x, 1.9 - bl / 2 - 0.05, -3.9, hs);
+    box(0.3, 0.06, 0.06, woodDark, x, 1.82, -3.88, hs);
+  }
+  const shield = cyl(0.5, 0.5, 0.08, 8, mat(0x7a2e3b), -0.5, 1.9, -3.95, hs); shield.rotation.x = Math.PI / 2;
+  cyl(0.15, 0.15, 0.1, 8, steel, -0.5, 1.9, -3.9, hs).rotation.x = Math.PI / 2;
+  for (const x of [-1.5, 4.2]) {
+    box(0.28, 0.36, 0.28, M.lantern, x, 2.2, -3.9, hs);
+    const l = new THREE.PointLight(0xffb060, 9, 12, 1.4); l.position.set(x, 2.1, -3.4); l.userData.base = 9; flickers.push(l); hs.add(l);
+  }
+
+  // anvil
+  const anvil = makeAnvil(); anvil.position.set(ANVIL_POS.x, 0, ANVIL_POS.z); hs.add(anvil);
+  houseColliders.push({ x: ANVIL_POS.x, z: ANVIL_POS.z, r: 0.75 });
+  const sp = new THREE.MeshBasicMaterial({ color: 0xffc060 }), spg = new THREE.OctahedronGeometry(0.05, 0);
+  for (let i = 0; i < 16; i++) { const m = new THREE.Mesh(spg, sp); m.visible = false; m.userData = { v: new THREE.Vector3(), life: 0 }; hs.add(m); sparks.push(m); }
+
+  // the blacksmith
+  const g = new THREE.Group(), skin = mat(0xc99a73), shirt = mat(0x6a2e2e), leather = mat(0x5b3a22);
+  box(0.5, 0.65, 0.35, mat(0x2a2a33), 0, 0.33, 0, g);
+  box(0.85, 0.7, 0.46, shirt, 0, 1.0, 0, g);
+  box(0.62, 0.95, 0.06, leather, 0, 0.82, 0.26, g);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.29, 6, 5), skin); head.position.y = 1.62; g.add(head);
+  box(0.36, 0.3, 0.2, mat(0x3a2418), 0, 1.45, 0.2, g);
+  const dk = new THREE.MeshBasicMaterial({ color: 0x111111 });
+  box(0.06, 0.06, 0.04, dk, -0.1, 1.68, 0.27, g); box(0.06, 0.06, 0.04, dk, 0.1, 1.68, 0.27, g);
+  box(0.18, 0.18, 0.55, shirt, -0.5, 1.05, 0.25, g);
+  const arm = new THREE.Group(); arm.position.set(0.5, 1.2, 0.0); g.add(arm);
+  box(0.18, 0.18, 0.6, shirt, 0, 0, 0.3, arm);
+  cyl(0.04, 0.04, 0.6, 5, M.bark, 0, 0, 0.75, arm).rotation.x = Math.PI / 2;
+  box(0.2, 0.3, 0.2, metal, 0, 0, 1.05, arm);
+  g.position.set(SMITH_POS.x, 0, SMITH_POS.z); g.rotation.y = -Math.PI / 2; g.userData.faceY = -Math.PI / 2;
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  hs.add(g); smith.group = g; smith.arm = arm;
+  houseColliders.push({ x: SMITH_POS.x, z: SMITH_POS.z, r: 0.55 });
+
+  interactables.push(
+    { world: 'house', getPos: () => ({ x: SMITH_POS.x, z: SMITH_POS.z }), r: 1.7, label: 'TALK', act: talkToSmith },
+    { world: 'house', getPos: () => ANVIL_POS, r: 1.5, label: 'USE ANVIL', act: useAnvil },
+    { world: 'house', getPos: () => ({ x: 0, z: 3.5 }), r: 1.4, label: 'LEAVE', act: () => switchWorld('outside') },
+  );
+}
+
+function updateHouse(dt, t) {
+  // chimney smoke
+  for (const p of smoke) {
+    const u = p.userData; u.t = (u.t + dt * 0.3) % 1;
+    p.position.set(1.9 + Math.sin(u.t * 6 + u.ph) * 0.3 + u.t * 0.9, 5.2 + u.t * 3.2, -1.2 + Math.cos(u.t * 5 + u.ph) * 0.2);
+    p.scale.setScalar(0.5 + u.t * 1.3); p.material.opacity = 0.32 * (1 - u.t);
+  }
+  if (world !== 'house') return;
+  for (const f of houseFlames) {
+    const k = 1 + Math.sin(t * 9 + f.userData.ph) * 0.18 + Math.sin(t * 17 + f.userData.ph) * 0.1;
+    f.scale.set(1, k, 1); f.position.y = f.userData.y + (k - 1) * 0.3;
+  }
+  // blacksmith hammering (pauses while talking to him)
+  const busy = talking && talkNpc === smith.group;
+  const ph = t * 5;
+  smith.arm.rotation.x = busy ? -0.4 : 0.3 - (0.5 + 0.5 * Math.sin(ph)) * 1.6;
+  const k = Math.floor((ph + Math.PI / 2) / (Math.PI * 2));
+  if (k !== smith.k) {
+    smith.k = k;
+    if (!busy) for (let i = 0, n = 0; i < sparks.length && n < 6; i++) {
+      const s = sparks[i]; if (s.userData.life > 0) continue;
+      s.position.set(ANVIL_POS.x + 0.1, 1.4, ANVIL_POS.z);
+      s.userData.v.set((Math.random() - 0.5) * 3, 2 + Math.random() * 2.5, (Math.random() - 0.5) * 3);
+      s.userData.life = 0.7; s.visible = true; n++;
+    }
+  }
+  for (const s of sparks) {
+    const u = s.userData; if (u.life <= 0) continue;
+    u.life -= dt; u.v.y -= 9 * dt;
+    s.position.addScaledVector(u.v, dt);
+    s.scale.setScalar(Math.max(0.05, u.life / 0.7));
+    if (u.life <= 0 || s.position.y < 0) { u.life = 0; s.visible = false; }
+  }
+}
+
+// world switching with a quick fade
+const fadeEl = document.getElementById('fade');
+let world = 'outside', activeScene = scene, transitioning = false;
+const outPos = new THREE.Vector2();
+function switchWorld(to) {
+  if (transitioning || talking) return;
+  transitioning = true; fadeEl.classList.add('on');
+  setTimeout(() => {
+    world = to;
+    if (to === 'house') { outPos.copy(pPos); houseScene.add(player); pPos.set(0, 2.9); facing = Math.PI; activeScene = houseScene; }
+    else { scene.add(player); pPos.set(HOUSE.x, HOUSE.z + HOUSE.hd + 1.7); facing = 0; activeScene = scene; }
+    camera.position.set(pPos.x + CAM_OFFSET.x, CAM_OFFSET.y, pPos.y + CAM_OFFSET.z);
+    fadeEl.classList.remove('on');
+    setTimeout(() => { transitioning = false; }, 250);
+  }, 260);
+}
+
 // graveyard patch near the middle-ish, trees around, pumpkins scattered
 for (let i = 0; i < 16; i++) { // tombstones in a cluster
   const a = rnd() * 6.28, d = Math.sqrt(rr(16, 90));
@@ -331,7 +556,7 @@ camera.lookAt(0, 0, 0);
 const keys = new Set();
 addEventListener('keydown', e => {
   keys.add(e.code); hideHint();
-  if ((e.code === 'KeyE' || e.code === 'Space') && !e.repeat) { e.preventDefault(); interact(); }
+  if (['KeyE', 'Space', 'Enter', 'NumpadEnter'].includes(e.code) && !e.repeat) { e.preventDefault(); interact(); }
 });
 addEventListener('keyup', e => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
@@ -368,7 +593,7 @@ let hintHidden = false;
 function hideHint() { if (hintHidden) return; hintHidden = true; document.getElementById('hint').style.opacity = 0; }
 
 function readInput() {
-  if (talking) return [0, 0];
+  if (talking || transitioning) return [0, 0];
   let x = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
   let y = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0);
   if (!x && !y) { x = joy.x; y = joy.y; }
@@ -460,12 +685,18 @@ function renderQuestHud() {
 }
 
 // dialogue runner
-let lines = [], lineIdx = 0, shown = 0, onEnd = null;
+let lines = [], lineIdx = 0, shown = 0, onEnd = null, talkNpc = null;
 const speed = 45; // characters per second
-function startTalk() {
+function openDialog(name, ls, end, npc) {
+  lines = ls; lineIdx = 0; shown = 0; onEnd = end || null; talkNpc = npc || null;
+  talking = true;
+  ui.dname.textContent = name;
+  ui.dialog.classList.add('on'); ui.talk.classList.remove('on');
+  ui.dtext.textContent = '';
+}
+function talkToMarrow() {
   const s = QUEST.state, d = QUEST.dialogue[s];
-  lines = typeof d === 'function' ? d() : d; lineIdx = 0; shown = 0;
-  onEnd = () => {
+  openDialog(QUEST.giver.name, typeof d === 'function' ? d() : d, () => {
     if (s === 'none') {
       QUEST.state = 'active';
       souls.forEach(o => (o.visible = !o.userData.got));
@@ -476,20 +707,44 @@ function startTalk() {
       toast('Quest complete!');
     }
     renderQuestHud();
-  };
-  talking = true;
-  ui.dname.textContent = QUEST.giver.name;
-  ui.dialog.classList.add('on'); ui.talk.classList.remove('on');
-  ui.dtext.textContent = '';
+  }, QUEST.giver.npc);
+}
+function talkToSmith() {
+  const l = smith.talked
+    ? ['Back again? The forge never sleeps.', 'The anvil is there when you are ready. Be gentle with the hammer.']
+    : ['*clang* *clang*', 'Hm? A customer. Do not see many of those out here.',
+       'Name is Hob. I forge, I mend, and I do not talk much. Mind the sparks.',
+       'That anvil is free to use once you have iron worth hammering. Come back with some, and I will show you how it is done.'];
+  if (QUEST.state === 'done') l.push('Old Marrow\'s fire burning brighter? Aye, I saw the glow from my chimney. Good work, traveller.');
+  smith.talked = true;
+  openDialog('Hob the Smith', l, null, smith.group);
+}
+function useAnvil() {
+  openDialog('Anvil', ['A heavy iron anvil, scarred by a thousand hammer blows.', 'It is still warm. Forging will be available soon.'], null, null);
 }
 function advance() {
   const line = lines[lineIdx];
   if (shown < line.length) { shown = line.length; return; }
-  if (++lineIdx >= lines.length) { talking = false; ui.dialog.classList.remove('on'); onEnd && onEnd(); return; }
+  if (++lineIdx >= lines.length) {
+    talking = false; talkNpc = null; ui.dialog.classList.remove('on');
+    const f = onEnd; onEnd = null; f && f(); return;
+  }
   shown = 0;
 }
-function nearNpc() { return QUEST.giver.npc.position.distanceTo(player.position) < 3.6; }
-function interact() { if (talking) advance(); else if (nearNpc()) startTalk(); }
+function currentInteractable() {
+  let best = null, bd = 1e9;
+  for (const o of interactables) {
+    if (o.world !== world) continue;
+    const p = o.getPos(), d = Math.hypot(p.x - pPos.x, p.z - pPos.y);
+    if (d < o.r && d < bd) { best = o; bd = d; }
+  }
+  return best;
+}
+function interact() {
+  if (talking) advance();
+  else if (!transitioning) { const o = currentInteractable(); if (o) o.act(); }
+}
+interactables.push({ world: 'outside', getPos: () => QUEST.giver.npc.position, r: 3.6, label: 'TALK', act: talkToMarrow });
 ui.talk.addEventListener('click', () => { ui.talk.blur(); interact(); });
 ui.dialog.addEventListener('click', interact);
 ['pointerdown', 'pointerup'].forEach(ev => { ui.talk.addEventListener(ev, e => e.stopPropagation()); ui.dialog.addEventListener(ev, e => e.stopPropagation()); });
@@ -506,17 +761,20 @@ function updateQuests(dt, t) {
     shown = Math.min(line.length, shown + dt * speed);
     ui.dtext.textContent = line.slice(0, Math.floor(shown));
     ui.dnext.style.visibility = shown >= line.length ? 'visible' : 'hidden';
-    const dx = player.position.x - npc.position.x, dz = player.position.z - npc.position.z;
-    npc.rotation.y += Math.atan2(Math.sin(Math.atan2(dx, dz) - npc.rotation.y), Math.cos(Math.atan2(dx, dz) - npc.rotation.y)) * Math.min(1, dt * 6);
-  } else {
-    const d = npc.userData.faceY - npc.rotation.y;
-    npc.rotation.y += Math.atan2(Math.sin(d), Math.cos(d)) * Math.min(1, dt * 4);
   }
-  ui.talk.classList.toggle('on', !talking && nearNpc());
+  for (const n of [npc, smith.group]) {
+    let want = n.userData.faceY;
+    if (talking && n === talkNpc) want = Math.atan2(pPos.x - n.position.x, pPos.y - n.position.z);
+    const d = Math.atan2(Math.sin(want - n.rotation.y), Math.cos(want - n.rotation.y));
+    n.rotation.y += d * Math.min(1, dt * (talking && n === talkNpc ? 6 : 4));
+  }
+  const it = !talking && !transitioning ? currentInteractable() : null;
+  ui.talk.classList.toggle('on', !!it);
+  if (it) ui.talk.textContent = it.label;
 
   // souls: float, collect, orbit fire when done
   let nearest = null, nd = 1e9;
-  for (const o of souls) {
+  if (world === 'outside') for (const o of souls) {
     const u = o.userData;
     if (QUEST.state === 'done') {
       const a = u.orbit + t * 0.6;
@@ -540,7 +798,7 @@ function updateQuests(dt, t) {
   let target = null;
   if (QUEST.state === 'active' && nearest) target = [nearest.x, nearest.z];
   else if (QUEST.state === 'ready') target = [npc.position.x, npc.position.z];
-  if (target && !talking) {
+  if (target && !talking && world === 'outside') {
     const dx = target[0] - player.position.x, dz = target[1] - player.position.z, dist = Math.hypot(dx, dz);
     ui.arrow.style.opacity = dist > 5 ? 0.85 : 0;
     ui.arrow.style.transform = `rotate(${Math.atan2(dx, -dz)}rad) translateY(-95px)`;
@@ -549,7 +807,7 @@ function updateQuests(dt, t) {
   if (toastT > 0 && (toastT -= dt) <= 0) ui.toast.classList.remove('on');
 }
 renderQuestHud();
-window.__spookie = { pPos, QUEST, souls, interact }; // debug/test hook
+window.__spookie = { pPos, QUEST, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -576,14 +834,29 @@ function tick() {
     walkT += dt * 11 * mag;
   }
   // collisions
-  for (const c of colliders) {
+  for (const c of world === 'house' ? houseColliders : colliders) {
+    if (c.hw) { // box collider: push out from the nearest point on the box
+      const nx = Math.min(c.x + c.hw, Math.max(c.x - c.hw, pPos.x)), nz = Math.min(c.z + c.hd, Math.max(c.z - c.hd, pPos.y));
+      const dx = pPos.x - nx, dz = pPos.y - nz, dist = Math.hypot(dx, dz);
+      if (dist < 0.35 && dist > 0.0001) { pPos.x = nx + dx / dist * 0.35; pPos.y = nz + dz / dist * 0.35; }
+      else if (dist <= 0.0001) { // inside the box: exit through the closest side
+        const ox = c.hw - Math.abs(pPos.x - c.x), oz = c.hd - Math.abs(pPos.y - c.z);
+        if (ox < oz) pPos.x = c.x + Math.sign(pPos.x - c.x || 1) * (c.hw + 0.35); else pPos.y = c.z + Math.sign(pPos.y - c.z || 1) * (c.hd + 0.35);
+      }
+      continue;
+    }
     const dx = pPos.x - c.x, dz = pPos.y - c.z, min = c.r + 0.35, dist = Math.hypot(dx, dz);
     if (dist < min && dist > 0.0001) { pPos.x = c.x + dx / dist * min; pPos.y = c.z + dz / dist * min; }
   }
-  const r = pPos.length();
-  if (r > WALK_R) pPos.multiplyScalar(WALK_R / r);
+  if (world === 'house') {
+    pPos.x = Math.min(HOUSE_BOUNDS.x1, Math.max(HOUSE_BOUNDS.x0, pPos.x));
+    pPos.y = Math.min(HOUSE_BOUNDS.z1, Math.max(HOUSE_BOUNDS.z0, pPos.y));
+  } else {
+    const r = pPos.length();
+    if (r > WALK_R) pPos.multiplyScalar(WALK_R / r);
+  }
 
-  const gy = heightAt(pPos.x, pPos.y);
+  const gy = world === 'house' ? 0 : heightAt(pPos.x, pPos.y);
   player.position.set(pPos.x, gy, pPos.y);
   body.rotation.y = facing;
   body.position.y = Math.abs(Math.sin(walkT)) * 0.12 * (mag > 0 ? 1 : 0);
@@ -619,6 +892,7 @@ function tick() {
   }
 
   updateQuests(dt, t);
+  updateHouse(dt, t);
 
   // follow camera
   camTarget.set(player.position.x, player.position.y, player.position.z);
@@ -630,7 +904,7 @@ function tick() {
   moon.position.set(player.position.x - 14, 22, player.position.z - 10);
   moon.target.position.copy(player.position);
 
-  renderer.render(scene, camera);
+  renderer.render(activeScene, camera);
   requestAnimationFrame(tick);
 }
 tick();

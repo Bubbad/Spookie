@@ -49,6 +49,8 @@
     border: 1px solid #7fe8ff; color: #bff4ff; font-size: 13px; opacity: 0; transition: opacity .4s; pointer-events: none; white-space: nowrap;
   }
   #toast.on { opacity: 1; }
+  #fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity .25s; }
+  #fade.on { opacity: 1; }
   #stick {
     position: fixed; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%;
     border: 2px solid rgba(255,154,60,.45); background: rgba(255,154,60,.08);
@@ -62,7 +64,8 @@
 </head>
 <body>
 <div id="title">SPOOKIE</div>
-<div id="hint">WASD / arrow keys to move &middot; or touch &amp; drag anywhere</div>
+<div id="hint">WASD / arrows to move &middot; Enter or E to interact &middot; or touch &amp; drag</div>
+<div id="fade"></div>
 <div id="quest"></div>
 <div id="arrow"></div>
 <div id="toast"></div>
