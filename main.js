@@ -210,8 +210,8 @@ const flames = [], embers = [];
     e.userData = { t: rnd() * 3, sp: rr(0.5, 1.1), a: rnd() * 6.28, r: rr(0.1, 0.4) };
     fire.add(e); embers.push(e);
   }
-  const fl = new THREE.PointLight(0xff7a22, 7, 20, 1.4);
-  fl.position.y = 1.3; fl.userData.base = 7;
+  const fl = new THREE.PointLight(0xff7a22, 40, 22, 1.2);
+  fl.position.y = 1.3; fl.userData.base = 40;
   flickers.push(fl);
   fire.add(fl);
   scene.add(fire);
