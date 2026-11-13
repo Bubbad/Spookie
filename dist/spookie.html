@@ -53624,6 +53624,8 @@ const ghosts = [];
 for (let i = 0; i < 4; i++) {
   const g = ghost(), a = rnd() * 6.28, d = rr(8, WALK_R - 4);
   g.userData = { cx: Math.cos(a) * d, cz: Math.sin(a) * d, r: rr(2, 5), sp: rr(0.2, 0.5), ph: rnd() * 6.28 };
+  const u0 = g.userData; // start on their orbit, not at the world origin (the spawn point)
+  g.position.set(u0.cx + Math.cos(u0.ph) * u0.r, 0.5 + heightAt(u0.cx, u0.cz), u0.cz + Math.sin(u0.ph) * u0.r);
   scene.add(g); ghosts.push(g);
 }
 
