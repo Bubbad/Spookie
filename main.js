@@ -174,7 +174,8 @@ function ghost() {
 
 // ---------- campfire with people ----------
 const FIRE = { x: 8, z: 6 };
-const flames = [], embers = [];
+const flames = [], embers = [], sitters = [];
+let fireBoost = 1; // grows when the quest is completed
 {
   const fy = heightAt(FIRE.x, FIRE.z);
   const fire = new THREE.Group();
@@ -245,7 +246,7 @@ const flames = [], embers = [];
     p.userData.ph = rnd() * 6.28;
     scene.add(p);
     colliders.push({ x: sx, z: sz, r: 0.6 });
-    (globalThis.sitters ||= []).push(p);
+    sitters.push(p);
   }
 }
 
@@ -328,7 +329,10 @@ camera.lookAt(0, 0, 0);
 
 // ---------- input ----------
 const keys = new Set();
-addEventListener('keydown', e => { keys.add(e.code); hideHint(); });
+addEventListener('keydown', e => {
+  keys.add(e.code); hideHint();
+  if ((e.code === 'KeyE' || e.code === 'Space') && !e.repeat) { e.preventDefault(); interact(); }
+});
 addEventListener('keyup', e => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
 
@@ -364,6 +368,7 @@ let hintHidden = false;
 function hideHint() { if (hintHidden) return; hintHidden = true; document.getElementById('hint').style.opacity = 0; }
 
 function readInput() {
+  if (talking) return [0, 0];
   let x = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
   let y = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0);
   if (!x && !y) { x = joy.x; y = joy.y; }
@@ -372,6 +377,179 @@ function readInput() {
   else if (l < 0.12) { x = y = 0; }
   return [x, y];
 }
+
+// ---------- quests & dialogue ----------
+const $ = id => document.getElementById(id);
+const ui = { quest: $('quest'), arrow: $('arrow'), talk: $('talk'), dialog: $('dialog'), dname: $('dname'), dtext: $('dtext'), dnext: $('dnext'), toast: $('toast') };
+let talking = false;
+
+// Quest data: add more entries here later. state: none -> active -> ready -> done
+const QUEST = {
+  title: 'The Lost Souls', need: 5, state: 'none', found: 0,
+  giver: { name: 'Old Marrow', npc: sitters[0] },
+  dialogue: {
+    none: [
+      'Ah... a living soul. Rare, this far from the village.',
+      'Sit, if you like. No, wait. The fire keeps us warm, but it does not keep us whole.',
+      'Five souls slipped out of these flames tonight. Pale blue things. They hide among the graves and the dead trees.',
+      'Bring them back to me, traveller. Your lantern will make them less shy.',
+      'And mind the green lights. Those are not souls. Those are hungry.',
+    ],
+    active: () => [
+      `Five pale lights, traveller. You have found ${QUEST.found} so far.`,
+      'Look near the graves and the dead trees. Follow the glow on your lantern.',
+    ],
+    ready: [
+      'You have them. I can hear them humming.',
+      'Hold them out to the fire...',
+      'There. Now they can rest. Thank you, traveller.',
+    ],
+    done: [
+      'The fire burns brighter, thanks to you.',
+      'Stay a while, if you dare. I may have more work for you... another night.',
+    ],
+  },
+};
+const souls = [];
+{
+  const coreGeo = new THREE.IcosahedronGeometry(0.2, 0), haloGeo = new THREE.SphereGeometry(0.55, 8, 6);
+  const placed = [];
+  for (let i = 0; i < QUEST.need; i++) {
+    let x, z, tries = 0;
+    do { [x, z] = spot(7, WALK_R - 2); tries++; }
+    while (tries < 200 && (Math.hypot(x - FIRE.x, z - FIRE.z) < 9 || placed.some(([a, b]) => Math.hypot(a - x, b - z) < 8)));
+    placed.push([x, z]);
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(coreGeo, new THREE.MeshBasicMaterial({ color: 0xbff4ff })));
+    g.add(new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({ color: 0x4fd0ff, transparent: true, opacity: 0.28, depthWrite: false })));
+    g.userData = { x, z, ph: rnd() * 6.28, got: false, orbit: i / QUEST.need * Math.PI * 2 };
+    g.position.set(x, heightAt(x, z) + 1, z);
+    g.visible = false;
+    scene.add(g); souls.push(g);
+  }
+}
+
+// "!" marker above the quest giver
+const marker = new THREE.Group();
+{
+  const mm = new THREE.MeshBasicMaterial({ color: 0xffd34d });
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.38, 0.14), mm), dot = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.14), mm);
+  bar.position.y = 0.2; dot.position.y = -0.1;
+  marker.add(bar, dot);
+  const npc = QUEST.giver.npc;
+  marker.position.set(0, 2.1, 0);
+  npc.add(marker);
+  // Marrow stands out: pointed hat brim and a staff
+  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.04, 8), npc.children[3].material);
+  brim.position.y = 1.28; npc.add(brim);
+  const staff = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 1.7, 5), M.bark);
+  staff.position.set(0.5, 0.85, 0.3); npc.add(staff);
+  npc.userData.faceY = npc.rotation.y;
+}
+
+let toastT = 0;
+function toast(msg) { ui.toast.textContent = msg; ui.toast.classList.add('on'); toastT = 3; }
+function renderQuestHud() {
+  const s = QUEST.state;
+  if (s === 'none') ui.quest.style.display = 'none';
+  else {
+    ui.quest.style.display = 'block';
+    ui.quest.innerHTML = `<b>${QUEST.title}</b><br>` + (s === 'active' ? `Find the lost souls <span>${QUEST.found}/${QUEST.need}</span>`
+      : s === 'ready' ? 'Return to Old Marrow by the fire' : 'Complete');
+  }
+}
+
+// dialogue runner
+let lines = [], lineIdx = 0, shown = 0, onEnd = null;
+const speed = 45; // characters per second
+function startTalk() {
+  const s = QUEST.state, d = QUEST.dialogue[s];
+  lines = typeof d === 'function' ? d() : d; lineIdx = 0; shown = 0;
+  onEnd = () => {
+    if (s === 'none') {
+      QUEST.state = 'active';
+      souls.forEach(o => (o.visible = !o.userData.got));
+      toast('Quest started: The Lost Souls');
+    } else if (s === 'ready') {
+      QUEST.state = 'done'; fireBoost = 1.5;
+      souls.forEach(o => (o.visible = true));
+      toast('Quest complete!');
+    }
+    renderQuestHud();
+  };
+  talking = true;
+  ui.dname.textContent = QUEST.giver.name;
+  ui.dialog.classList.add('on'); ui.talk.classList.remove('on');
+  ui.dtext.textContent = '';
+}
+function advance() {
+  const line = lines[lineIdx];
+  if (shown < line.length) { shown = line.length; return; }
+  if (++lineIdx >= lines.length) { talking = false; ui.dialog.classList.remove('on'); onEnd && onEnd(); return; }
+  shown = 0;
+}
+function nearNpc() { return QUEST.giver.npc.position.distanceTo(player.position) < 3.6; }
+function interact() { if (talking) advance(); else if (nearNpc()) startTalk(); }
+ui.talk.addEventListener('click', () => { ui.talk.blur(); interact(); });
+ui.dialog.addEventListener('click', interact);
+['pointerdown', 'pointerup'].forEach(ev => { ui.talk.addEventListener(ev, e => e.stopPropagation()); ui.dialog.addEventListener(ev, e => e.stopPropagation()); });
+
+function updateQuests(dt, t) {
+  const npc = QUEST.giver.npc;
+  // marker visible when the giver has something new to say
+  marker.visible = QUEST.state === 'none' || QUEST.state === 'ready';
+  marker.position.y = 2.1 + Math.sin(t * 3) * 0.1; marker.rotation.y = t * 2;
+
+  // typewriter
+  if (talking) {
+    const line = lines[lineIdx];
+    shown = Math.min(line.length, shown + dt * speed);
+    ui.dtext.textContent = line.slice(0, Math.floor(shown));
+    ui.dnext.style.visibility = shown >= line.length ? 'visible' : 'hidden';
+    const dx = player.position.x - npc.position.x, dz = player.position.z - npc.position.z;
+    npc.rotation.y += Math.atan2(Math.sin(Math.atan2(dx, dz) - npc.rotation.y), Math.cos(Math.atan2(dx, dz) - npc.rotation.y)) * Math.min(1, dt * 6);
+  } else {
+    const d = npc.userData.faceY - npc.rotation.y;
+    npc.rotation.y += Math.atan2(Math.sin(d), Math.cos(d)) * Math.min(1, dt * 4);
+  }
+  ui.talk.classList.toggle('on', !talking && nearNpc());
+
+  // souls: float, collect, orbit fire when done
+  let nearest = null, nd = 1e9;
+  for (const o of souls) {
+    const u = o.userData;
+    if (QUEST.state === 'done') {
+      const a = u.orbit + t * 0.6;
+      o.position.set(FIRE.x + Math.cos(a) * 1.8, heightAt(FIRE.x, FIRE.z) + 2.4 + Math.sin(t * 2 + u.ph) * 0.2, FIRE.z + Math.sin(a) * 1.8);
+    } else if (u.got) { o.visible = false; continue; }
+    else {
+      o.position.y = heightAt(u.x, u.z) + 1 + Math.sin(t * 2 + u.ph) * 0.25;
+      if (!o.visible) continue;
+      const d = Math.hypot(u.x - player.position.x, u.z - player.position.z);
+      if (d < nd) { nd = d; nearest = u; }
+      if (d < 1.3 && QUEST.state === 'active') {
+        u.got = true; o.visible = false; QUEST.found++;
+        if (QUEST.found >= QUEST.need) { QUEST.state = 'ready'; toast('All souls found! Return to Old Marrow'); }
+        else toast(`Soul collected ${QUEST.found}/${QUEST.need}`);
+        renderQuestHud();
+      }
+    }
+    o.children[1].scale.setScalar(1 + Math.sin(t * 4 + u.ph) * 0.15);
+  }
+  // arrow toward the nearest uncollected soul (or back to the fire when ready)
+  let target = null;
+  if (QUEST.state === 'active' && nearest) target = [nearest.x, nearest.z];
+  else if (QUEST.state === 'ready') target = [npc.position.x, npc.position.z];
+  if (target && !talking) {
+    const dx = target[0] - player.position.x, dz = target[1] - player.position.z, dist = Math.hypot(dx, dz);
+    ui.arrow.style.opacity = dist > 5 ? 0.85 : 0;
+    ui.arrow.style.transform = `rotate(${Math.atan2(dx, -dz)}rad) translateY(-95px)`;
+  } else ui.arrow.style.opacity = 0;
+
+  if (toastT > 0 && (toastT -= dt) <= 0) ui.toast.classList.remove('on');
+}
+renderQuestHud();
+window.__spookie = { pPos, QUEST, souls, interact }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -416,7 +594,7 @@ function tick() {
 
   // fire animation
   for (const f of flames) {
-    const u = f.userData, k = 1 + Math.sin(t * 9 + u.ph) * 0.12 + Math.sin(t * 17 + u.ph) * 0.08;
+    const u = f.userData, k = fireBoost * (1 +Math.sin(t * 9 + u.ph) * 0.12 + Math.sin(t * 17 + u.ph) * 0.08);
     f.scale.set(1 + Math.sin(t * 7 + u.ph) * 0.08, k, 1 + Math.cos(t * 8 + u.ph) * 0.08);
     f.rotation.y = t * (1 + u.i);
   }
@@ -426,7 +604,7 @@ function tick() {
     e.position.set(Math.cos(u.a + u.t) * (u.r + u.t * 0.15), 0.5 + u.t * 1.1, Math.sin(u.a + u.t) * (u.r + u.t * 0.15));
     e.scale.setScalar(Math.max(0.1, 1 - u.t / 2.5));
   }
-  for (const p of globalThis.sitters || []) p.children[3].rotation.z = Math.sin(t * 0.8 + p.userData.ph) * 0.05;
+  for (const p of sitters) p.children[3].rotation.z = Math.sin(t * 0.8 + p.userData.ph) * 0.05;
 
   // ghosts + wisps
   for (const g of ghosts) {
@@ -439,6 +617,8 @@ function tick() {
     w.position.set(u.x + Math.sin(t * u.sp + u.ph) * 0.8, heightAt(u.x, u.z) + u.y + Math.sin(t * 1.3 + u.ph) * 0.3, u.z + Math.cos(t * u.sp * 0.8 + u.ph) * 0.8);
     w.rotation.y = t;
   }
+
+  updateQuests(dt, t);
 
   // follow camera
   camTarget.set(player.position.x, player.position.y, player.position.z);

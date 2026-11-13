@@ -16,6 +16,39 @@
     position: fixed; bottom: 14px; left: 0; right: 0; text-align: center; pointer-events: none;
     color: #8f86b8; font-size: 12px; transition: opacity 1.5s;
   }
+  #quest {
+    position: fixed; top: calc(max(14px, env(safe-area-inset-top)) + 34px); left: max(14px, env(safe-area-inset-left)); display: none;
+    max-width: 46vw; padding: 8px 12px; border-left: 3px solid #ff9a3c; background: rgba(10,7,20,.6);
+    color: #d8d0f0; font-size: 12px; line-height: 1.5; pointer-events: none;
+  }
+  #quest b { color: #ff9a3c; letter-spacing: 1px; }
+  #quest span { color: #7fe8ff; }
+  #arrow {
+    position: fixed; left: 50%; top: 52%; width: 0; height: 0; margin: -9px 0 0 -9px; pointer-events: none; opacity: 0; transition: opacity .3s;
+    border-left: 9px solid transparent; border-right: 9px solid transparent; border-bottom: 18px solid #7fe8ff;
+    filter: drop-shadow(0 0 6px #4fd0ff);
+  }
+  #talk {
+    position: fixed; left: 50%; bottom: max(70px, calc(env(safe-area-inset-bottom) + 56px)); transform: translateX(-50%);
+    display: none; padding: 12px 28px; border: 2px solid #ff9a3c; border-radius: 4px; background: rgba(10,7,20,.85);
+    color: #ffd9a8; font: inherit; font-size: 15px; letter-spacing: 2px; box-shadow: 0 0 16px rgba(255,106,0,.45); cursor: pointer;
+  }
+  #talk.on { display: block; }
+  #dialog {
+    position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+    width: min(560px, calc(100vw - 28px)); box-sizing: border-box; display: none; padding: 14px 16px 12px;
+    border: 2px solid #ff9a3c; background: rgba(10,7,20,.92); color: #e6e0f7; cursor: pointer;
+    box-shadow: 0 0 22px rgba(255,106,0,.35);
+  }
+  #dialog.on { display: block; }
+  #dname { color: #ff9a3c; font-size: 13px; letter-spacing: 2px; margin-bottom: 6px; text-transform: uppercase; }
+  #dtext { font-size: 15px; line-height: 1.5; min-height: 4.5em; }
+  #dnext { text-align: right; color: #7fe8ff; font-size: 12px; }
+  #toast {
+    position: fixed; top: calc(max(14px, env(safe-area-inset-top)) + 100px); left: 50%; transform: translateX(-50%); padding: 8px 16px; background: rgba(10,7,20,.8);
+    border: 1px solid #7fe8ff; color: #bff4ff; font-size: 13px; opacity: 0; transition: opacity .4s; pointer-events: none; white-space: nowrap;
+  }
+  #toast.on { opacity: 1; }
   #stick {
     position: fixed; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%;
     border: 2px solid rgba(255,154,60,.45); background: rgba(255,154,60,.08);
@@ -30,6 +63,11 @@
 <body>
 <div id="title">SPOOKIE</div>
 <div id="hint">WASD / arrow keys to move &middot; or touch &amp; drag anywhere</div>
+<div id="quest"></div>
+<div id="arrow"></div>
+<div id="toast"></div>
+<button id="talk">TALK</button>
+<div id="dialog"><div id="dname"></div><div id="dtext"></div><div id="dnext">tap &#9656;</div></div>
 <div id="stick"><div id="knob"></div></div>
 <script type="importmap">{ "imports": { "three": "./lib/three.module.js" } }</script>
 <script type="module" src="./main.js"></script>
