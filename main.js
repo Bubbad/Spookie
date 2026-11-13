@@ -672,16 +672,73 @@ const marker = new THREE.Group();
   npc.userData.faceY = npc.rotation.y;
 }
 
+// Second quest, from the blacksmith. state: none -> active -> ready -> done
+const SQ = {
+  title: 'Iron for the Anvil', need: 4, state: 'none', found: 0,
+  dialogue: {
+    none: [
+      '*clang* *clang*',
+      'Hm? A customer. Do not see many of those out here.',
+      'Name is Hob. I forge, I mend, and I do not talk much. Mind the sparks.',
+      'Trouble is, I am out of iron. Not a scrap left.',
+      'Four chunks of rust-red ore lie scattered across the island. Ore likes to hide where nothing grows.',
+      'Bring them to me and I will forge you something useful. Your little lantern could use some proper iron.',
+    ],
+    active: () => [
+      `Four chunks of rust-red ore, traveller. You have ${SQ.found} so far.`,
+      'Look near the dead trees and out toward the edge of the island. Follow the arrow.',
+    ],
+    ready: [
+      'Now that is good iron.',
+      '*clang* *clang* *clang*',
+      'There. A lantern frame of true iron. It burns brighter and reaches farther than that tin thing you carried. Take it.',
+    ],
+    done: [
+      'How is the lantern treating you?',
+      'The anvil is yours whenever you want it. I may have more orders... later.',
+    ],
+  },
+};
+const ores = [];
+{
+  const geo = new THREE.DodecahedronGeometry(0.34, 0);
+  const placed = souls.map(o => [o.userData.x, o.userData.z]);
+  for (let i = 0; i < SQ.need; i++) {
+    let x, z, tries = 0;
+    do { [x, z] = spot(12, WALK_R - 1); tries++; }
+    while (tries < 300 && (Math.hypot(x - FIRE.x, z - FIRE.z) < 9 || Math.hypot(x - HOUSE.x, z - HOUSE.z) < 8 || placed.some(([a, b]) => Math.hypot(a - x, b - z) < 7)));
+    placed.push([x, z]);
+    const g = new THREE.Group();
+    const rock = new THREE.Mesh(geo, mat(0xb5532a, { emissive: 0x501800, emissiveIntensity: 0.9 }));
+    rock.scale.set(1, 0.8, 1.1); rock.rotation.set(rnd() * 3, rnd() * 3, 0);
+    const glint = new THREE.Mesh(new THREE.OctahedronGeometry(0.1, 0), new THREE.MeshBasicMaterial({ color: 0xffb36b }));
+    glint.position.set(0.12, 0.28, 0.1);
+    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.6, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff7a22, transparent: true, opacity: 0.18, depthWrite: false }));
+    g.add(rock, glint, halo);
+    g.userData = { x, z, ph: rnd() * 6.28, got: false };
+    g.position.set(x, heightAt(x, z) + 0.3, z);
+    g.visible = false;
+    scene.add(g); ores.push(g);
+  }
+}
+const smithMarker = new THREE.Group();
+{
+  const mm = new THREE.MeshBasicMaterial({ color: 0xffd34d });
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.38, 0.14), mm), dot = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.14), mm);
+  bar.position.y = 0.2; dot.position.y = -0.1;
+  smithMarker.add(bar, dot); smith.group.add(smithMarker);
+}
+
 let toastT = 0;
 function toast(msg) { ui.toast.textContent = msg; ui.toast.classList.add('on'); toastT = 3; }
 function renderQuestHud() {
-  const s = QUEST.state;
-  if (s === 'none') ui.quest.style.display = 'none';
-  else {
-    ui.quest.style.display = 'block';
-    ui.quest.innerHTML = `<b>${QUEST.title}</b><br>` + (s === 'active' ? `Find the lost souls <span>${QUEST.found}/${QUEST.need}</span>`
-      : s === 'ready' ? 'Return to Old Marrow by the fire' : 'Complete');
-  }
+  const parts = [];
+  if (QUEST.state !== 'none') parts.push(`<b>${QUEST.title}</b><br>` + (QUEST.state === 'active' ? `Find the lost souls <span>${QUEST.found}/${QUEST.need}</span>`
+    : QUEST.state === 'ready' ? 'Return to Old Marrow by the fire' : 'Complete'));
+  if (SQ.state !== 'none') parts.push(`<b>${SQ.title}</b><br>` + (SQ.state === 'active' ? `Find iron ore <span>${SQ.found}/${SQ.need}</span>`
+    : SQ.state === 'ready' ? 'Return to Hob in the smithy' : 'Complete'));
+  ui.quest.style.display = parts.length ? 'block' : 'none';
+  ui.quest.innerHTML = parts.join('<div style="height:6px"></div>');
 }
 
 // dialogue runner
@@ -710,14 +767,22 @@ function talkToMarrow() {
   }, QUEST.giver.npc);
 }
 function talkToSmith() {
-  const l = smith.talked
-    ? ['Back again? The forge never sleeps.', 'The anvil is there when you are ready. Be gentle with the hammer.']
-    : ['*clang* *clang*', 'Hm? A customer. Do not see many of those out here.',
-       'Name is Hob. I forge, I mend, and I do not talk much. Mind the sparks.',
-       'That anvil is free to use once you have iron worth hammering. Come back with some, and I will show you how it is done.'];
-  if (QUEST.state === 'done') l.push('Old Marrow\'s fire burning brighter? Aye, I saw the glow from my chimney. Good work, traveller.');
+  const st = SQ.state, d = SQ.dialogue[st];
+  const l = (typeof d === 'function' ? d() : d).slice();
+  if (st === 'done' && QUEST.state === 'done') l.push('Old Marrow\'s fire burning brighter? Aye, I saw the glow from my chimney. Good work, traveller.');
   smith.talked = true;
-  openDialog('Hob the Smith', l, null, smith.group);
+  openDialog('Hob the Smith', l, () => {
+    if (st === 'none') {
+      SQ.state = 'active';
+      ores.forEach(o => (o.visible = !o.userData.got));
+      toast('Quest started: Iron for the Anvil');
+    } else if (st === 'ready') {
+      SQ.state = 'done';
+      lantern.userData.base = 7; lantern.distance = 24; // the reward
+      toast('Quest complete! Your lantern burns brighter');
+    }
+    renderQuestHud();
+  }, smith.group);
 }
 function useAnvil() {
   openDialog('Anvil', ['A heavy iron anvil, scarred by a thousand hammer blows.', 'It is still warm. Forging will be available soon.'], null, null);
@@ -754,6 +819,8 @@ function updateQuests(dt, t) {
   // marker visible when the giver has something new to say
   marker.visible = QUEST.state === 'none' || QUEST.state === 'ready';
   marker.position.y = 2.1 + Math.sin(t * 3) * 0.1; marker.rotation.y = t * 2;
+  smithMarker.visible = SQ.state === 'none' || SQ.state === 'ready';
+  smithMarker.position.y = 2.3 + Math.sin(t * 3) * 0.1; smithMarker.rotation.y = t * 2;
 
   // typewriter
   if (talking) {
@@ -794,10 +861,31 @@ function updateQuests(dt, t) {
     }
     o.children[1].scale.setScalar(1 + Math.sin(t * 4 + u.ph) * 0.15);
   }
-  // arrow toward the nearest uncollected soul (or back to the fire when ready)
-  let target = null;
-  if (QUEST.state === 'active' && nearest) target = [nearest.x, nearest.z];
-  else if (QUEST.state === 'ready') target = [npc.position.x, npc.position.z];
+  // ore pickups
+  let nearestOre = null, od = 1e9;
+  if (world === 'outside') for (const o of ores) {
+    const u = o.userData;
+    if (u.got) { o.visible = false; continue; }
+    o.children[1].position.y = 0.28 + Math.sin(t * 3 + u.ph) * 0.06;
+    o.children[2].scale.setScalar(1 + Math.sin(t * 4 + u.ph) * 0.15);
+    if (!o.visible) continue;
+    const d = Math.hypot(u.x - pPos.x, u.z - pPos.y);
+    if (d < od) { od = d; nearestOre = u; }
+    if (d < 1.3 && SQ.state === 'active') {
+      u.got = true; o.visible = false; SQ.found++;
+      if (SQ.found >= SQ.need) { SQ.state = 'ready'; toast('All ore found! Return to Hob'); }
+      else toast(`Iron ore collected ${SQ.found}/${SQ.need}`);
+      renderQuestHud();
+    }
+  }
+  // arrow toward the closest current objective
+  const cands = [];
+  if (QUEST.state === 'active' && nearest) cands.push([nearest.x, nearest.z]);
+  if (QUEST.state === 'ready') cands.push([npc.position.x, npc.position.z]);
+  if (SQ.state === 'active' && nearestOre) cands.push([nearestOre.x, nearestOre.z]);
+  if (SQ.state === 'ready') cands.push([HOUSE.x, HOUSE.z + HOUSE.hd]);
+  let target = null, bestD = 1e9;
+  for (const c of cands) { const d = Math.hypot(c[0] - pPos.x, c[1] - pPos.y); if (d < bestD) { bestD = d; target = c; } }
   if (target && !talking && world === 'outside') {
     const dx = target[0] - player.position.x, dz = target[1] - player.position.z, dist = Math.hypot(dx, dz);
     ui.arrow.style.opacity = dist > 5 ? 0.85 : 0;
@@ -807,7 +895,7 @@ function updateQuests(dt, t) {
   if (toastT > 0 && (toastT -= dt) <= 0) ui.toast.classList.remove('on');
 }
 renderQuestHud();
-window.__spookie = { pPos, QUEST, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+window.__spookie = { pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
