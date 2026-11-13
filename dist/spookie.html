@@ -46,6 +46,18 @@
   #toast.on { opacity: 1; }
   #fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity .25s; }
   #fade.on { opacity: 1; }
+  #hearts { position: fixed; top: max(14px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); font-size: 20px; letter-spacing: 2px; pointer-events: none; text-shadow: 0 0 8px rgba(0,0,0,.8); }
+  #hearts span { color: #3a2a3f; }
+  #hearts span.on { color: #ff3b5c; text-shadow: 0 0 8px #ff3b5c; }
+  #attack {
+    position: fixed; right: max(18px, env(safe-area-inset-right)); bottom: max(78px, calc(env(safe-area-inset-bottom) + 64px));
+    width: 78px; height: 78px; border-radius: 50%; border: 2px solid #ff5a6a; background: rgba(255,60,90,.14); color: #ffc9d1;
+    font: inherit; font-size: 12px; letter-spacing: 1px; display: none; box-shadow: 0 0 16px rgba(255,60,90,.4); touch-action: none; cursor: pointer;
+  }
+  #attack.on { display: block; }
+  #attack:active { background: rgba(255,60,90,.35); }
+  #hurt { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 90px 24px rgba(255,20,40,.65); opacity: 0; transition: opacity .2s; }
+  #hurt.on { opacity: 1; }
   #stick {
     position: fixed; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%;
     border: 2px solid rgba(255,154,60,.45); background: rgba(255,154,60,.08);
@@ -60,8 +72,11 @@
 </style>
 
 <div id="title">SPOOKIE</div>
-<div id="hint">WASD / arrows to move &middot; Enter or E to interact &middot; or touch &amp; drag</div>
+<div id="hint">WASD / arrows move &middot; Enter/E interact &middot; F/J/Space attack &middot; or touch &amp; drag</div>
 <div id="fade"></div>
+<div id="hurt"></div>
+<div id="hearts"></div>
+<button id="attack">ATTACK</button>
 <div id="quest"></div>
 <div id="arrow"></div>
 <div id="toast"></div>
@@ -53124,6 +53139,7 @@ const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a
 
 const WORLD_R = 30;       // island radius
 const WALK_R = 27;        // how far the player can walk
+const HOLLOW = { x: 14, z: -14, r: 9 }; // the Blighted Hollow (hostile area)
 const HOUSE = { x: -11, z: 10, hw: 3, hd: 2.5 }; // blacksmith house (door faces +z)
 
 // gentle rolling hills
@@ -53188,11 +53204,13 @@ function buildTerrain() {
   flat.computeVertexNormals();
   const pos = flat.attributes.position;
   const colors = new Float32Array(pos.count * 3);
-  const grassA = new THREE.Color(0x2f6b3a), grassB = new THREE.Color(0x3f7f3c), dirt = new THREE.Color(0x3a2c24), c = new THREE.Color();
+  const grassA = new THREE.Color(0x2f6b3a), grassB = new THREE.Color(0x3f7f3c), dirt = new THREE.Color(0x3a2c24), blight = new THREE.Color(0x2c1f3a), c = new THREE.Color();
   for (let i = 0; i < pos.count; i += 3) {
     const cx = (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3, cy = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3, cz = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3;
     c.copy(grassA).lerp(grassB, rnd()).multiplyScalar(0.7 + rnd() * 0.3);
     if (cy < -0.5 || Math.hypot(cx, cz) > WORLD_R - 1.5) c.copy(dirt).multiplyScalar(0.8 + rnd() * 0.4);
+    const dh = Math.hypot(cx - HOLLOW.x, cz - HOLLOW.z); // corrupted ground inside the hollow
+    if (dh < HOLLOW.r + 1) c.lerp(blight.clone().multiplyScalar(0.7 + 0.5 * Math.abs(Math.sin(cx * 12.9 + cz * 78.2))), smooth(HOLLOW.r + 1, HOLLOW.r - 2, dh));
     for (let k = 0; k < 3; k++) colors.set([c.r, c.g, c.b], (i + k) * 3);
   }
   flat.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -53591,6 +53609,82 @@ function switchWorld(to) {
   }, 260);
 }
 
+// ---------- the Blighted Hollow (hostile area): gate, fence, decor ----------
+const gateDir = new THREE.Vector2(-Math.SQRT1_2, Math.SQRT1_2); // from the hollow's centre toward the rest of the island
+const GATE = { x: HOLLOW.x + gateDir.x * HOLLOW.r, z: HOLLOW.z + gateDir.y * HOLLOW.r };
+const inHollow = (x, z, pad = 0) => Math.hypot(x - HOLLOW.x, z - HOLLOW.z) < HOLLOW.r + pad;
+function hspot(minR = 3) { // a free random spot inside the hollow
+  for (let k = 0; k < 300; k++) {
+    const a = rnd() * Math.PI * 2, d = Math.sqrt(rr(minR * minR, (HOLLOW.r - 1.5) ** 2));
+    const x = HOLLOW.x + Math.cos(a) * d, z = HOLLOW.z + Math.sin(a) * d;
+    if (Math.hypot(x - GATE.x, z - GATE.z) < 3.5) continue;
+    if (colliders.every(c => Math.hypot(c.x - x, c.z - z) > c.r + 1.2)) return [x, z];
+  }
+  return [HOLLOW.x + HOLLOW.r * 0.5, HOLLOW.z];
+}
+{
+  const stoneD = mat(0x3a3548), boneC = mat(0xd9d3c0);
+  const redGlow = new THREE.MeshBasicMaterial({ color: 0xff3a2a });
+  const purpleGlow = mat(0x8a3cff, { emissive: 0x5a1cc0, emissiveIntensity: 1.3 });
+
+  // skull gate
+  const gate = new THREE.Group();
+  box(0.8, 3.6, 0.8, stoneD, -2, 1.8, 0, gate); box(0.8, 3.6, 0.8, stoneD, 2, 1.8, 0, gate);
+  box(5.2, 0.6, 0.9, stoneD, 0, 3.7, 0, gate);
+  for (const sx of [-2, 2]) { const sp = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.8, 4), stoneD); sp.position.set(sx, 4.0, 0); gate.add(sp); }
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.38, 6, 5), boneC); skull.position.set(0, 4.4, 0.1); gate.add(skull);
+  box(0.12, 0.12, 0.1, redGlow, -0.14, 4.45, 0.42, gate); box(0.12, 0.12, 0.1, redGlow, 0.14, 4.45, 0.42, gate);
+  for (const sx of [-1, 1]) {
+    cyl(0.06, 0.07, 0.9, 5, woodDark, sx * 1.5, 2.3, 0.3, gate);
+    const fl = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.45, 5), new THREE.MeshBasicMaterial({ color: 0xff5522 })); fl.position.set(sx * 1.5, 2.95, 0.3); gate.add(fl);
+    const l = new THREE.PointLight(0xff4a2a, 9, 12, 1.4); l.position.set(sx * 1.5, 3.1, 1.0); l.userData.base = 9; flickers.push(l); gate.add(l);
+  }
+  place(gate, GATE.x, GATE.z, 0);
+  gate.rotation.y = Math.atan2(gateDir.x, gateDir.y); // front faces the island
+  for (const sgn of [-1, 1]) colliders.push({ x: GATE.x + Math.SQRT1_2 * 2 * sgn, z: GATE.z + Math.SQRT1_2 * 2 * sgn, r: 0.6 });
+
+  // bone fence around the rim, open at the gate
+  const a0 = Math.atan2(gateDir.y, gateDir.x), postG = new THREE.BoxGeometry(0.18, 1, 0.18), skG = new THREE.SphereGeometry(0.17, 5, 4);
+  for (let i = 0; i < 36; i++) {
+    const ang = (i / 36) * Math.PI * 2;
+    if (Math.abs(Math.atan2(Math.sin(ang - a0), Math.cos(ang - a0))) < 0.3) continue;
+    const x = HOLLOW.x + Math.cos(ang) * HOLLOW.r, z = HOLLOW.z + Math.sin(ang) * HOLLOW.r;
+    if (Math.hypot(x, z) > WORLD_R - 2) continue;
+    const p = new THREE.Mesh(postG, boneC), h = rr(0.8, 1.4);
+    p.scale.y = h; p.position.set(x, heightAt(x, z) + h / 2, z); p.rotation.set(rr(-0.12, 0.12), 0, rr(-0.12, 0.12));
+    p.castShadow = true; scene.add(p);
+    if (i % 4 === 0) { const s = new THREE.Mesh(skG, boneC); s.position.set(x, heightAt(x, z) + h + 0.12, z); scene.add(s); }
+  }
+
+  // cursed brazier in the middle
+  const bz = new THREE.Group();
+  cyl(0.9, 1.05, 0.5, 8, stoneD, 0, 0.25, 0, bz);
+  const f1 = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.3, 5), new THREE.MeshBasicMaterial({ color: 0xff3355, transparent: true, opacity: 0.9 })); f1.position.y = 1.15; bz.add(f1);
+  const f2 = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.9, 5), new THREE.MeshBasicMaterial({ color: 0xffa86b })); f2.position.y = 0.95; bz.add(f2);
+  const bl = new THREE.PointLight(0xff2a55, 16, 18, 1.3); bl.position.y = 2; bl.userData.base = 16; flickers.push(bl); bz.add(bl);
+  place(bz, HOLLOW.x, HOLLOW.z, 1.0);
+
+  // dead trees, crystals, bone piles, skull totems
+  for (let i = 0; i < 8; i++) { const [x, z] = hspot(3.5); place(deadTree(), x, z, 0.45); }
+  for (let i = 0; i < 6; i++) {
+    const [x, z] = hspot(3);
+    const c = new THREE.Mesh(new THREE.OctahedronGeometry(0.5, 0), purpleGlow); c.scale.set(0.7, 2.2, 0.7); c.position.y = 1.0;
+    const grp = new THREE.Group(); grp.add(c); grp.rotation.y = rnd() * 6; place(grp, x, z, 0.5);
+  }
+  for (let i = 0; i < 6; i++) {
+    const [x, z] = hspot(3), g = new THREE.Group();
+    for (let k = 0; k < 4; k++) { const b = box(0.7, 0.07, 0.07, boneC, rr(-0.3, 0.3), 0.06 + k * 0.03, rr(-0.3, 0.3), g); b.rotation.y = rnd() * 3; }
+    const s = new THREE.Mesh(new THREE.SphereGeometry(0.2, 5, 4), boneC); s.position.set(0.2, 0.2, 0.1); g.add(s);
+    place(g, x, z, 0);
+  }
+  for (let i = 0; i < 3; i++) {
+    const [x, z] = hspot(3.5), g = new THREE.Group();
+    cyl(0.08, 0.1, 2.4, 5, woodDark, 0, 1.2, 0, g);
+    for (let k = 0; k < 2; k++) { const s = new THREE.Mesh(new THREE.SphereGeometry(0.22, 5, 4), boneC); s.position.set(0, 1.6 + k * 0.5, 0.1); g.add(s); box(0.07, 0.07, 0.05, redGlow, -0.08, 1.64 + k * 0.5, 0.3, g); box(0.07, 0.07, 0.05, redGlow, 0.08, 1.64 + k * 0.5, 0.3, g); }
+    place(g, x, z, 0.4);
+  }
+}
+
 // graveyard patch near the middle-ish, trees around, pumpkins scattered
 for (let i = 0; i < 16; i++) { // tombstones in a cluster
   const a = rnd() * 6.28, d = Math.sqrt(rr(16, 90));
@@ -53674,6 +53768,8 @@ camera.lookAt(0, 0, 0);
 const keys = new Set();
 addEventListener('keydown', e => {
   keys.add(e.code); hideHint();
+  if (['KeyF', 'KeyJ'].includes(e.code) && !e.repeat) attack();
+  if (e.code === 'Space' && !e.repeat && !talking && !currentInteractable()) attack();
   if (['KeyE', 'Space', 'Enter', 'NumpadEnter'].includes(e.code) && !e.repeat) { e.preventDefault(); interact(); }
 });
 addEventListener('keyup', e => keys.delete(e.code));
@@ -54013,7 +54109,244 @@ function updateQuests(dt, t) {
   if (toastT > 0 && (toastT -= dt) <= 0) ui.toast.classList.remove('on');
 }
 renderQuestHud();
-window.__spookie = { ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+
+// ---------- combat ----------
+const HP_MAX = 5;
+const combat = { hp: HP_MAX, inv: 0, atkT: 0, cd: 0, hit: false, inside: false, dead: false };
+const pk = new THREE.Vector2(); // player knockback velocity
+const enemies = [], pickups = [], fxPool = [];
+const heartsEl = $('hearts'), hurtEl = $('hurt'), atkBtn = $('attack');
+function renderHearts() { heartsEl.innerHTML = Array.from({ length: HP_MAX }, (_, i) => `<span class="${i < combat.hp ? 'on' : ''}">&#9829;</span>`).join(''); }
+renderHearts();
+
+// the player's sword (left hand) and its slash arc
+const swordPivot = new THREE.Group();
+swordPivot.position.set(-0.34, 0.95, 0.2);
+swordPivot.rotation.set(0.55, -0.25, 0);
+body.add(swordPivot);
+{
+  const blade = mat(0xdfe6f5, { metalness: 0.3, roughness: 0.4, emissive: 0x223355, emissiveIntensity: 0.5 });
+  box(0.07, 0.05, 0.95, blade, 0, 0, 0.8, swordPivot);
+  box(0.32, 0.06, 0.09, metal, 0, 0, 0.3, swordPivot);
+  cyl(0.03, 0.03, 0.28, 5, woodDark, 0, 0, 0.15, swordPivot).rotation.x = Math.PI / 2;
+  swordPivot.traverse(o => { if (o.isMesh) o.castShadow = true; });
+}
+const slash = new THREE.Mesh(
+  new THREE.RingGeometry(0.7, 2.1, 14, 1, -Math.PI / 2 - 1.3, 2.6),
+  new THREE.MeshBasicMaterial({ color: 0xbfd8ff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+slash.rotation.x = -Math.PI / 2; slash.position.y = 0.25; body.add(slash);
+
+// particles
+function spawnFx(x, y, z, color, n) {
+  for (let i = 0; i < n; i++) {
+    let m = fxPool.find(f => f.userData.life <= 0);
+    if (!m) { if (fxPool.length >= 48) return; m = new THREE.Mesh(new THREE.OctahedronGeometry(0.07, 0), new THREE.MeshBasicMaterial({ color })); m.userData = { v: new THREE.Vector3(), life: 0 }; scene.add(m); fxPool.push(m); }
+    m.material.color.setHex(color); m.position.set(x, y, z);
+    m.userData.v.set((Math.random() - 0.5) * 4, 1.5 + Math.random() * 3, (Math.random() - 0.5) * 4);
+    m.userData.life = 0.6 + Math.random() * 0.3; m.visible = true;
+  }
+}
+
+// ---- skeletons ----
+function makeSkeleton() {
+  const g = new THREE.Group(), bone = mat(0xd9d3c0), dark = mat(0x2b2433);
+  const red = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+  box(0.12, 0.55, 0.12, bone, -0.14, 0.28, 0, g); box(0.12, 0.55, 0.12, bone, 0.14, 0.28, 0, g);
+  box(0.42, 0.15, 0.24, bone, 0, 0.62, 0, g);
+  box(0.5, 0.55, 0.28, bone, 0, 1.0, 0, g);
+  for (let i = 0; i < 3; i++) box(0.52, 0.05, 0.3, dark, 0, 0.88 + i * 0.14, 0.01, g);
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.25, 6, 5), bone); skull.position.y = 1.55; g.add(skull);
+  box(0.2, 0.1, 0.2, bone, 0, 1.36, 0.04, g);
+  box(0.07, 0.07, 0.05, red, -0.09, 1.58, 0.22, g); box(0.07, 0.07, 0.05, red, 0.09, 1.58, 0.22, g);
+  box(0.1, 0.5, 0.1, bone, -0.34, 1.0, 0, g);
+  const arm = new THREE.Group(); arm.position.set(0.34, 1.2, 0); g.add(arm);
+  box(0.1, 0.1, 0.55, bone, 0, 0, 0.27, arm);
+  box(0.06, 0.06, 0.85, mat(0x8a5a3a), 0, 0, 0.85, arm);
+  box(0.22, 0.05, 0.06, dark, 0, 0, 0.5, arm);
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.08, 0.08), new THREE.MeshBasicMaterial({ color: 0xff3b5c })); bar.position.y = 2.1; bar.visible = false; g.add(bar);
+  g.scale.setScalar(1.1);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return { g, bone, arm, bar };
+}
+for (let i = 0; i < 7; i++) {
+  let x, z, tries = 0;
+  do { [x, z] = hspot(3.5); tries++; } while (tries < 50 && enemies.some(e => Math.hypot(e.home.x - x, e.home.z - z) < 2.8));
+  const s = makeSkeleton();
+  const e = { ...s, hp: 3, maxHp: 3, home: { x, z }, x, z, face: rnd() * 6, state: 'idle', t: 0, stun: 0, kx: 0, kz: 0, flash: 0, deadT: 0, respawnT: 0, wt: rr(0, 3), tx: x, tz: z, ph: rnd() * 6 };
+  s.g.position.set(x, heightAt(x, z), z); scene.add(s.g); enemies.push(e);
+}
+function respawn(e) { e.hp = e.maxHp; e.state = 'idle'; e.x = e.home.x; e.z = e.home.z; e.g.visible = true; e.g.scale.setScalar(1.1); e.bar.visible = false; e.stun = 0; e.deadT = 0; }
+
+function spawnHeart(x, z) {
+  const g = new THREE.Group();
+  const h = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 0), new THREE.MeshBasicMaterial({ color: 0xff3b5c })); h.scale.y = 1.3;
+  const halo = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff3b5c, transparent: true, opacity: 0.2, depthWrite: false }));
+  g.add(h, halo); g.position.set(x, heightAt(x, z) + 0.6, z); scene.add(g);
+  pickups.push({ g, x, z, life: 25, ph: rnd() * 6 });
+}
+
+function damageEnemy(e, dmg, dx, dz) {
+  const d = Math.hypot(dx, dz) || 1;
+  e.hp -= dmg; e.flash = 0.18; e.stun = 0.35; e.kx = dx / d * 7; e.kz = dz / d * 7;
+  if (e.state === 'windup') e.state = 'chase';
+  spawnFx(e.x, 1.1, e.z, 0xe8e0c8, 6);
+  e.bar.visible = true; e.bar.scale.x = Math.max(0.01, e.hp / e.maxHp);
+  if (e.hp <= 0) {
+    e.state = 'dead'; e.deadT = 0; e.respawnT = 30;
+    spawnFx(e.x, 1.0, e.z, 0xe8e0c8, 10); spawnFx(e.x, 1.0, e.z, 0xff3b5c, 4);
+    e.bone.emissive.setHex(0x000000);
+    if (rnd() < 0.45) spawnHeart(e.x, e.z);
+  }
+}
+function applyHits() {
+  const fx_ = Math.sin(facing), fz_ = Math.cos(facing);
+  for (const e of enemies) {
+    if (e.state === 'dead') continue;
+    const dx = e.x - pPos.x, dz = e.z - pPos.y, d = Math.hypot(dx, dz);
+    if (d < 2.3 && (dx * fx_ + dz * fz_) / (d || 1) > 0.2) damageEnemy(e, 1, dx, dz);
+  }
+}
+function attack() {
+  if (talking || transitioning || world !== 'outside' || combat.cd > 0 || combat.dead) return;
+  combat.cd = 0.5; combat.atkT = 0.0001; combat.hit = false;
+  let best = null, bd = 3.2; // soft aim at the nearest enemy
+  for (const e of enemies) { if (e.state === 'dead') continue; const d = Math.hypot(e.x - pPos.x, e.z - pPos.y); if (d < bd) { bd = d; best = e; } }
+  if (best) facing = Math.atan2(best.x - pPos.x, best.z - pPos.y);
+}
+atkBtn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); attack(); });
+
+function hurtPlayer(n, fx_, fz_) {
+  if (combat.inv > 0 || combat.dead || world !== 'outside') return;
+  combat.hp = Math.max(0, combat.hp - n); combat.inv = 1.1;
+  const dx = pPos.x - fx_, dz = pPos.y - fz_, d = Math.hypot(dx, dz) || 1;
+  pk.set(dx / d * 7, dz / d * 7);
+  renderHearts(); hurtEl.classList.add('on'); setTimeout(() => hurtEl.classList.remove('on'), 220);
+  spawnFx(pPos.x, 1, pPos.y, 0xff3b5c, 6);
+  if (combat.hp <= 0) playerDie();
+}
+function playerDie() {
+  combat.dead = true; transitioning = true; fadeEl.classList.add('on'); toast('You were defeated...');
+  setTimeout(() => {
+    combat.hp = HP_MAX; combat.dead = false; combat.inv = 2; slowT = 0; pPos.set(0, 0); pk.set(0, 0);
+    for (const e of enemies) if (e.state !== 'dead') { e.state = 'idle'; e.hp = e.maxHp; e.x = e.home.x; e.z = e.home.z; e.stun = 0; e.bar.visible = false; }
+    renderHearts();
+    camera.position.set(pPos.x + CAM_OFFSET.x, CAM_OFFSET.y, pPos.y + CAM_OFFSET.z);
+    fadeEl.classList.remove('on');
+    setTimeout(() => { transitioning = false; toast('You wake at the start of the island'); }, 250);
+  }, 900);
+}
+
+function pushOut(e, c, r) { // keep a circle (radius r) at e.x/e.z out of a collider
+  if (c.hw) {
+    const nx = Math.min(c.x + c.hw, Math.max(c.x - c.hw, e.x)), nz = Math.min(c.z + c.hd, Math.max(c.z - c.hd, e.z));
+    const dx = e.x - nx, dz = e.z - nz, d = Math.hypot(dx, dz);
+    if (d < r && d > 0.0001) { e.x = nx + dx / d * r; e.z = nz + dz / d * r; }
+    return;
+  }
+  const dx = e.x - c.x, dz = e.z - c.z, min = c.r + r, d = Math.hypot(dx, dz);
+  if (d < min && d > 0.0001) { e.x = c.x + dx / d * min; e.z = c.z + dz / d * min; }
+}
+function stepTo(e, tx, tz, sp, dt) {
+  const dx = tx - e.x, dz = tz - e.z, d = Math.hypot(dx, dz);
+  if (d > 0.05) { e.x += dx / d * sp * dt; e.z += dz / d * sp * dt; e.face = Math.atan2(dx, dz); e.moving = true; }
+}
+
+function updateCombat(dt, t) {
+  const out = world === 'outside';
+  atkBtn.classList.toggle('on', out && !talking && !transitioning);
+  combat.cd = Math.max(0, combat.cd - dt); combat.inv = Math.max(0, combat.inv - dt);
+  // sword swing
+  if (combat.atkT > 0) {
+    combat.atkT += dt;
+    const p = Math.min(1, combat.atkT / 0.3), ease = 1 - (1 - p) * (1 - p);
+    swordPivot.rotation.set(0.1, -1.4 + 2.8 * ease, 0);
+    slash.material.opacity = 0.75 * (1 - p);
+    if (!combat.hit && p >= 0.35) { combat.hit = true; applyHits(); }
+    if (p >= 1) { combat.atkT = 0; swordPivot.rotation.set(0.55, -0.25, 0); slash.material.opacity = 0; }
+  }
+  body.visible = combat.inv <= 0 || Math.floor(t * 14) % 2 === 0;
+  // particles
+  for (const f of fxPool) {
+    const u = f.userData; if (u.life <= 0) continue;
+    u.life -= dt; u.v.y -= 9 * dt; f.position.addScaledVector(u.v, dt); f.scale.setScalar(Math.max(0.1, u.life / 0.7));
+    if (u.life <= 0) f.visible = false;
+  }
+  if (!out) return;
+  if (pk.lengthSq() > 0.01) { pPos.x += pk.x * dt; pPos.y += pk.y * dt; pk.multiplyScalar(Math.max(0, 1 - dt * 8)); }
+  const nowIn = inHollow(pPos.x, pPos.y);
+  if (nowIn && !combat.inside) toast('The Blighted Hollow... skeletons rise here');
+  combat.inside = nowIn;
+
+  // heart pickups
+  for (let i = pickups.length - 1; i >= 0; i--) {
+    const k = pickups[i]; k.life -= dt;
+    k.g.position.y = heightAt(k.x, k.z) + 0.6 + Math.sin(t * 3 + k.ph) * 0.12; k.g.rotation.y = t * 2;
+    const d = Math.hypot(k.x - pPos.x, k.z - pPos.y);
+    if (k.life <= 0 || (d < 1.1 && combat.hp < HP_MAX)) {
+      if (k.life > 0) { combat.hp++; renderHearts(); toast('+1 heart'); }
+      scene.remove(k.g); pickups.splice(i, 1);
+    }
+  }
+  if (talking || transitioning) return;
+
+  // skeleton AI
+  const playerHere = inHollow(pPos.x, pPos.y, 3);
+  for (const e of enemies) {
+    if (e.state === 'dead') {
+      e.deadT += dt; e.g.scale.y = Math.max(0.05, 1.1 - e.deadT * 2.4);
+      if (e.deadT > 0.5) e.g.visible = false;
+      e.respawnT -= dt;
+      if (e.respawnT <= 0 && Math.hypot(e.home.x - pPos.x, e.home.z - pPos.y) > 12) respawn(e);
+      continue;
+    }
+    const dx = pPos.x - e.x, dz = pPos.y - e.z, dist = Math.hypot(dx, dz);
+    e.t += dt; e.flash = Math.max(0, e.flash - dt); e.moving = false;
+    let armT = 0.2;
+    if (e.stun > 0) {
+      e.stun -= dt; e.x += e.kx * dt; e.z += e.kz * dt; e.kx *= Math.max(0, 1 - dt * 7); e.kz *= Math.max(0, 1 - dt * 7);
+    } else if (e.state === 'idle') {
+      if (playerHere && dist < 7.5 && combat.hp > 0) { e.state = 'chase'; }
+      else {
+        e.wt -= dt;
+        if (e.wt <= 0) { e.wt = rr(2, 4); e.tx = e.home.x + rr(-2, 2); e.tz = e.home.z + rr(-2, 2); }
+        if (Math.hypot(e.tx - e.x, e.tz - e.z) > 0.3) stepTo(e, e.tx, e.tz, 0.8, dt);
+      }
+    } else if (e.state === 'chase') {
+      if (!playerHere || dist > 16 || combat.hp <= 0) e.state = 'return';
+      else if (dist < 1.35) { e.state = 'windup'; e.t = 0; }
+      else stepTo(e, pPos.x, pPos.y, 2.8, dt);
+    } else if (e.state === 'windup') {
+      e.face = Math.atan2(dx, dz); armT = -1.6;
+      if (e.t > 0.55) {
+        if (dist < 1.9) hurtPlayer(1, e.x, e.z);
+        e.state = 'recover'; e.t = 0;
+      }
+    } else if (e.state === 'recover') {
+      armT = e.t < 0.18 ? 0.7 : 0.2;
+      if (e.t > 0.7) e.state = 'chase';
+    } else if (e.state === 'return') {
+      stepTo(e, e.home.x, e.home.z, 2.4, dt);
+      if (Math.hypot(e.home.x - e.x, e.home.z - e.z) < 0.6) { e.state = 'idle'; e.hp = e.maxHp; e.bar.visible = false; }
+      else if (playerHere && dist < 6) e.state = 'chase';
+    }
+    // soft collisions: other skeletons, player, scenery
+    for (const o of enemies) { if (o === e || o.state === 'dead') continue; const ox = e.x - o.x, oz = e.z - o.z, od = Math.hypot(ox, oz); if (od < 0.9 && od > 0.001) { e.x += ox / od * (0.9 - od) * 0.5; e.z += oz / od * (0.9 - od) * 0.5; } }
+    if (dist < 0.8 && dist > 0.001) { const push = (0.8 - dist) * 0.5; pPos.x += dx / dist * push; pPos.y += dz / dist * push; e.x -= dx / dist * push; e.z -= dz / dist * push; }
+    for (const c of colliders) pushOut(e, c, 0.4);
+    const rr_ = Math.hypot(e.x, e.z); if (rr_ > WALK_R) { e.x *= WALK_R / rr_; e.z *= WALK_R / rr_; }
+    // visuals
+    const g = e.g;
+    g.position.set(e.x, heightAt(e.x, e.z) + (e.moving ? Math.abs(Math.sin(e.t * 9 + e.ph)) * 0.08 : 0), e.z);
+    const dr = Math.atan2(Math.sin(e.face - g.rotation.y), Math.cos(e.face - g.rotation.y));
+    g.rotation.y += dr * Math.min(1, dt * 10);
+    e.arm.rotation.x += (armT - e.arm.rotation.x) * Math.min(1, dt * 18);
+    const warn = e.state === 'windup' ? 0.5 + 0.5 * Math.sin(t * 30) : 0;
+    e.bone.emissive.setHex(e.flash > 0 ? 0xff2020 : warn > 0 ? 0xffa000 : 0x000000);
+    e.bone.emissiveIntensity = e.flash > 0 ? 1.2 : warn;
+  }
+}
+
+window.__spookie = { enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -54111,6 +54444,7 @@ function tick() {
 
   updateQuests(dt, t);
   updateHouse(dt, t);
+  updateCombat(dt, t);
 
   // follow camera
   camTarget.set(player.position.x, player.position.y, player.position.z);
