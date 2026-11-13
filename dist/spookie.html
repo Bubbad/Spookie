@@ -53412,8 +53412,8 @@ function makeAnvil() {
   const roofG = new THREE.Group();
   const roof = new THREE.Mesh(new THREE.ConeGeometry(4.9, 2.3, 4), roofM);
   roof.rotation.y = Math.PI / 4; roofG.add(roof); roofG.scale.set(1, 1, 0.8); roofG.position.y = 3.85; h.add(roofG);
-  box(0.8, 2.6, 0.8, M.stone, 1.9, 3.7, -1.2, h);        // chimney
-  box(0.5, 0.1, 0.5, glowOrange, 1.9, 5.02, -1.2, h);
+  box(0.8, 2.6, 0.8, M.stone, -2.0, 3.7, -1.6, h);        // chimney
+  box(0.5, 0.1, 0.5, glowOrange, -2.0, 5.02, -1.6, h);
   // door + frame
   box(1.3, 1.9, 0.14, doorM, 0, 1.25, 2.55, h);
   box(1.6, 0.15, 0.2, woodDark, 0, 2.28, 2.55, h);
@@ -53543,7 +53543,7 @@ function updateHouse(dt, t) {
   // chimney smoke
   for (const p of smoke) {
     const u = p.userData; u.t = (u.t + dt * 0.3) % 1;
-    p.position.set(1.9 + Math.sin(u.t * 6 + u.ph) * 0.3 + u.t * 0.9, 5.2 + u.t * 3.2, -1.2 + Math.cos(u.t * 5 + u.ph) * 0.2);
+    p.position.set(-2.0 + Math.sin(u.t * 6 + u.ph) * 0.3 + u.t * 0.9, 5.2 + u.t * 3.2, -1.6 + Math.cos(u.t * 5 + u.ph) * 0.2);
     p.scale.setScalar(0.5 + u.t * 1.3); p.material.opacity = 0.32 * (1 - u.t);
   }
   if (world !== 'house') return;
