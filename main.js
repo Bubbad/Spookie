@@ -638,6 +638,7 @@ const keys = new Set();
 addEventListener('keydown', e => {
   keys.add(e.code); hideHint();
   if (['KeyF', 'KeyJ'].includes(e.code) && !e.repeat) attack();
+  if (['KeyQ', 'KeyK'].includes(e.code) && !e.repeat) castSpell();
   if (e.code === 'Space' && !e.repeat && !talking && !currentInteractable()) attack();
   if (['KeyE', 'Space', 'Enter', 'NumpadEnter'].includes(e.code) && !e.repeat) { e.preventDefault(); interact(); }
 });
@@ -1215,7 +1216,67 @@ function updateCombat(dt, t) {
   }
 }
 
-window.__spookie = { enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+// ---------- spell: Light Nova (a ring of light bursting out from the player) ----------
+const spell = { cd: 0, cdMax: 4, t: -1, x: 0, z: 0, hit: new Set() };
+const SPELL_R = 7.5, SPELL_T = 0.85, SPELL_DMG = 2;
+const spellBtn = $('spell');
+const nova = new THREE.Group(); nova.visible = false; scene.add(nova);
+const novaMats = {
+  core: new THREE.MeshBasicMaterial({ color: 0xcdeaff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }),
+  glow: new THREE.MeshBasicMaterial({ color: 0x6a7bff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }),
+  wash: new THREE.MeshBasicMaterial({ color: 0x8fb8ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }),
+  spark: new THREE.MeshBasicMaterial({ color: 0xe8f6ff, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false }),
+};
+const novaCore = new THREE.Mesh(new THREE.RingGeometry(0.93, 1, 72), novaMats.core);
+const novaGlow = new THREE.Mesh(new THREE.RingGeometry(0.55, 1, 72), novaMats.glow);
+const novaTrail = new THREE.Mesh(new THREE.RingGeometry(0.88, 1, 72), novaMats.glow);
+const novaWash = new THREE.Mesh(new THREE.CircleGeometry(1, 48), novaMats.wash);
+for (const m of [novaCore, novaGlow, novaTrail, novaWash]) { m.rotation.x = -Math.PI / 2; nova.add(m); }
+novaWash.position.y = -0.02;
+const novaLight = new THREE.PointLight(0x9fd8ff, 0, 22, 1.4); novaLight.position.y = 1.6; nova.add(novaLight);
+const novaSparks = [];
+{
+  const g = new THREE.OctahedronGeometry(0.09, 0);
+  for (let i = 0; i < 44; i++) { const m = new THREE.Mesh(g, novaMats.spark); m.userData = { a: (i / 44) * Math.PI * 2 + rnd() * 0.1, j: rr(0.9, 1.05), lift: rr(0.2, 1.4), ph: rnd() * 6 }; nova.add(m); novaSparks.push(m); }
+}
+function castSpell() {
+  if (talking || transitioning || world !== 'outside' || combat.dead || spell.cd > 0 || spell.t >= 0) return;
+  spell.cd = spell.cdMax; spell.t = 0; spell.x = pPos.x; spell.z = pPos.y; spell.hit.clear();
+  nova.position.set(spell.x, heightAt(spell.x, spell.z) + 0.25, spell.z); nova.visible = true;
+  spawnFx(spell.x, 1, spell.z, 0xcdeaff, 8);
+}
+spellBtn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); castSpell(); });
+
+function updateSpell(dt, t) {
+  const out = world === 'outside';
+  spellBtn.classList.toggle('on', out && !talking && !transitioning);
+  spell.cd = Math.max(0, spell.cd - dt);
+  spellBtn.style.setProperty('--cd', (spell.cd / spell.cdMax).toFixed(3));
+  spellBtn.classList.toggle('ready', spell.cd <= 0);
+  if (spell.t < 0) return;
+  spell.t += dt;
+  const p = Math.min(1, spell.t / SPELL_T), ease = 1 - Math.pow(1 - p, 3), r = Math.max(0.05, SPELL_R * ease);
+  const fade = 1 - p;
+  novaCore.scale.setScalar(r); novaGlow.scale.setScalar(r); novaTrail.scale.setScalar(Math.max(0.05, r * 0.82)); novaWash.scale.setScalar(r);
+  const hold = 1 - p * p; // stays bright for most of the expansion
+  novaMats.core.opacity = hold; novaMats.glow.opacity = 0.85 * hold; novaMats.wash.opacity = 0.3 * fade;
+  novaLight.intensity = 70 * fade * fade;
+  for (const s of novaSparks) {
+    const u = s.userData, rad = r * u.j;
+    s.position.set(Math.cos(u.a) * rad, 0.15 + u.lift * p * (0.6 + 0.4 * Math.sin(t * 8 + u.ph)), Math.sin(u.a) * rad);
+    s.scale.setScalar(Math.max(0.05, fade * (0.8 + 0.5 * Math.sin(t * 20 + u.ph))));
+  }
+  nova.position.y = heightAt(spell.x, spell.z) + 0.25;
+  // damage whatever the ring front has reached
+  for (const e of enemies) {
+    if (e.state === 'dead' || spell.hit.has(e)) continue;
+    const dx = e.x - spell.x, dz = e.z - spell.z;
+    if (Math.hypot(dx, dz) <= r) { spell.hit.add(e); damageEnemy(e, SPELL_DMG, dx, dz); e.stun = 0.7; spawnFx(e.x, 1.2, e.z, 0xcdeaff, 8); }
+  }
+  if (p >= 1) { spell.t = -1; nova.visible = false; novaLight.intensity = 0; }
+}
+
+window.__spookie = { castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -1314,6 +1375,7 @@ function tick() {
   updateQuests(dt, t);
   updateHouse(dt, t);
   updateCombat(dt, t);
+  updateSpell(dt, t);
 
   // follow camera
   camTarget.set(player.position.x, player.position.y, player.position.z);
