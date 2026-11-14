@@ -54504,6 +54504,16 @@ function initAudio() {
   lfoTo(0.043, 220, hf.frequency); lfoTo(0.097, 110, hf.frequency);
   lfoTo(0.067, 1.0, hg.gain); lfoTo(0.113, 0.7, hg.gain);
   hs.connect(hf); hf.connect(hg); hg.connect(L.wind); hs.start(0, 3.1);
+  // fire bus: a soft continuous roar + hiss; its volume follows distance to the nearest fire
+  audio.fireG = ctx.createGain(); audio.fireG.gain.value = 0; audio.fireG.connect(comp);
+  const fs = ctx.createBufferSource(); fs.buffer = brown; fs.loop = true;
+  const ff = ctx.createBiquadFilter(); ff.type = 'lowpass'; ff.frequency.value = 450;
+  const fg = ctx.createGain(); fg.gain.value = 0.55; lfoTo(0.8, 0.18, fg.gain); lfoTo(2.3, 0.1, fg.gain);
+  fs.connect(ff); ff.connect(fg); fg.connect(audio.fireG); fs.start(0, 1.7);
+  const hs2 = ctx.createBufferSource(); hs2.buffer = nb; hs2.loop = true;
+  const hf2 = ctx.createBiquadFilter(); hf2.type = 'bandpass'; hf2.frequency.value = 3200; hf2.Q.value = 0.6;
+  const hg2 = ctx.createGain(); hg2.gain.value = 0.05; lfoTo(1.7, 0.025, hg2.gain); lfoTo(3.1, 0.015, hg2.gain);
+  hs2.connect(hf2); hf2.connect(hg2); hg2.connect(audio.fireG); hs2.start(0, 0.4);
   // ghost hum: two close sines with vibrato
   L.ghost = mk();
   const gf = ctx.createBiquadFilter(); gf.type = 'lowpass'; gf.frequency.value = 600; gf.connect(L.ghost);
@@ -54524,13 +54534,13 @@ function tone(f, dur, type = 'sine', vol = 0.2, f2 = null, delay = 0, dest = nul
   const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   o.connect(g); g.connect(dest || audio.sfx); o.start(t0); o.stop(t0 + dur + 0.05);
 }
-function noise(dur, type, f1, f2, vol, delay = 0, q = 1) {
+function noise(dur, type, f1, f2, vol, delay = 0, q = 1, dest = null) {
   const ctx = audio.ctx, t0 = ctx.currentTime + delay;
   const src = ctx.createBufferSource(); src.buffer = audio.noise;
   const fl = ctx.createBiquadFilter(); fl.type = type; fl.frequency.setValueAtTime(f1, t0); fl.Q.value = q;
   if (f2) fl.frequency.exponentialRampToValueAtTime(f2, t0 + dur);
   const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + Math.min(0.01, dur / 3)); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  src.connect(fl); fl.connect(g); g.connect(audio.sfx); src.start(t0, Math.random() * 1.5, dur + 0.05);
+  src.connect(fl); fl.connect(g); g.connect(dest || audio.sfx); src.start(t0, Math.random() * 1.5, dur + 0.05);
 }
 function bell(f, vol = 0.2, delay = 0, bus = null) {
   const ctx = audio.ctx, t0 = ctx.currentTime + delay, out = bus || audio.L.bell;
@@ -54581,6 +54591,15 @@ function sfxForToast(m) { // play a matching sound for a toast message
   else if (m.startsWith('The Blighted')) sfx.horn();
 }
 
+function crackle() { // wood snaps and pops: uneven loudness, sometimes in quick bursts
+  const n = Math.random() < 0.3 ? 2 + Math.floor(Math.random() * 3) : 1;
+  for (let i = 0; i < n; i++) {
+    const loud = Math.pow(Math.random(), 2.5), d = i * (0.02 + Math.random() * 0.04);
+    noise(0.012 + Math.random() * 0.03, 'bandpass', 1500 + Math.random() * 4500, null, 0.04 + loud * 0.35, d, 1 + Math.random() * 2, audio.fireG);
+    if (Math.random() < 0.18) tone(180 + Math.random() * 260, 0.04, 'sine', 0.04 + loud * 0.2, 90, d, audio.fireG);
+  }
+}
+
 function updateAudio(dt) {
   const ctx = audio.ctx;
   if (!ctx || ctx.state !== 'running') return;
@@ -54609,15 +54628,18 @@ function updateAudio(dt) {
     const f = M_.bells[Math.floor(Math.random() * M_.bells.length)];
     bell(f, 0.2); if (Math.random() < 0.35) bell(M_.bells[Math.floor(Math.random() * M_.bells.length)], 0.15, 0.35);
   }
-  // fire crackle: louder near the campfire / hollow brazier, constant by the forge
+  // fire: volume follows distance, but the crackle rate stays constant
   let cv = 0;
-  if (house) cv = 0.5;
+  if (house) cv = 0.6;
   else if (out) {
     const d1 = Math.hypot(FIRE.x - pPos.x, FIRE.z - pPos.y), d2 = Math.hypot(HOLLOW.x - pPos.x, HOLLOW.z - pPos.y);
-    cv = Math.max(Math.pow(Math.max(0, 1 - d1 / 14), 2) * 0.55, Math.pow(Math.max(0, 1 - d2 / 12), 2) * 0.3);
+    cv = Math.max(Math.pow(Math.max(0, 1 - d1 / 16), 2) * 0.9, Math.pow(Math.max(0, 1 - d2 / 12), 2) * 0.5);
   }
-  audio.t.crackle += dt * 30 * cv;
-  while (audio.t.crackle >= 1) { audio.t.crackle -= 1; noise(0.03 + Math.random() * 0.04, 'highpass', 1200 + Math.random() * 3000, null, 0.05 + cv * 0.12); }
+  audio.fireG.gain.setTargetAtTime(cv, now, 0.25);
+  if (cv > 0.03) {
+    audio.t.crackle -= dt;
+    if (audio.t.crackle <= 0) { crackle(); audio.t.crackle = -Math.log(1 - Math.random()) * 0.11 + 0.02; }
+  }
 }
 
 window.__spookie = { sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
