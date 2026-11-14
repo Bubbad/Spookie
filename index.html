@@ -70,6 +70,13 @@
   }
   #spell.on { display: block; }
   #spell.ready { box-shadow: 0 0 18px rgba(140,190,255,.85); }
+  #sound {
+    position: fixed; top: calc(max(14px, env(safe-area-inset-top)) + 34px); right: max(14px, env(safe-area-inset-right));
+    width: 34px; height: 34px; border-radius: 50%; border: 1px solid rgba(255,154,60,.6); background: rgba(10,7,20,.6);
+    color: #ffb36b; font: inherit; font-size: 16px; line-height: 1; cursor: pointer; padding: 0; touch-action: none;
+  }
+  #sound.muted { color: #6b5a80; border-color: rgba(107,90,128,.6); }
+  #sound.muted::after { content: ""; position: absolute; left: 20%; right: 20%; top: 50%; height: 2px; background: #ff5a6a; transform: rotate(-40deg); }
   #hurt { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 90px 24px rgba(255,20,40,.65); opacity: 0; transition: opacity .2s; }
   #hurt.on { opacity: 1; }
   #stick {
@@ -89,6 +96,7 @@
 <div id="fade"></div>
 <div id="hurt"></div>
 <div id="hearts"></div>
+<button id="sound">&#9835;</button>
 <button id="attack">ATTACK</button>
 <button id="spell">NOVA</button>
 <div id="quest"></div>

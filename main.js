@@ -445,6 +445,7 @@ function updateHouse(dt, t) {
   const k = Math.floor((ph + Math.PI / 2) / (Math.PI * 2));
   if (k !== smith.k) {
     smith.k = k;
+    if (!busy) sfx.clang();
     if (!busy) for (let i = 0, n = 0; i < sparks.length && n < 6; i++) {
       const s = sparks[i]; if (s.userData.life > 0) continue;
       s.position.set(ANVIL_POS.x + 0.1, 1.4, ANVIL_POS.z);
@@ -467,7 +468,7 @@ let world = 'outside', activeScene = scene, transitioning = false;
 const outPos = new THREE.Vector2();
 function switchWorld(to) {
   if (transitioning || talking) return;
-  transitioning = true; fadeEl.classList.add('on');
+  transitioning = true; fadeEl.classList.add('on'); sfx.door();
   setTimeout(() => {
     world = to;
     if (to === 'house') { outPos.copy(pPos); houseScene.add(player); pPos.set(0, 2.9); facing = Math.PI; activeScene = houseScene; }
@@ -639,6 +640,7 @@ addEventListener('keydown', e => {
   keys.add(e.code); hideHint();
   if (['KeyF', 'KeyJ'].includes(e.code) && !e.repeat) attack();
   if (['KeyQ', 'KeyK'].includes(e.code) && !e.repeat) castSpell();
+  if (e.code === 'KeyM' && !e.repeat) { initAudio(); setMuted(!audio.muted); }
   if (e.code === 'Space' && !e.repeat && !talking && !currentInteractable()) attack();
   if (['KeyE', 'Space', 'Enter', 'NumpadEnter'].includes(e.code) && !e.repeat) { e.preventDefault(); interact(); }
 });
@@ -814,7 +816,7 @@ const smithMarker = new THREE.Group();
 }
 
 let toastT = 0;
-function toast(msg) { ui.toast.textContent = msg; ui.toast.classList.add('on'); toastT = 3; }
+function toast(msg) { sfxForToast(msg); ui.toast.textContent = msg; ui.toast.classList.add('on'); toastT = 3; }
 function renderQuestHud() {
   const parts = [];
   if (QUEST.state !== 'none') parts.push(`<b>${QUEST.title}</b><br>` + (QUEST.state === 'active' ? `Find the lost souls <span>${QUEST.found}/${QUEST.need}</span>`
@@ -909,7 +911,10 @@ function updateQuests(dt, t) {
   // typewriter
   if (talking) {
     const line = lines[lineIdx];
+    const prevShown = Math.floor(shown);
     shown = Math.min(line.length, shown + dt * speed);
+    const curShown = Math.floor(shown);
+    if (curShown > prevShown && curShown % 2 === 0 && line[curShown - 1] !== ' ') sfx.blip(talkNpc);
     ui.dtext.textContent = line.slice(0, Math.floor(shown));
     ui.dnext.style.visibility = shown >= line.length ? 'visible' : 'hidden';
   }
@@ -1057,12 +1062,12 @@ function spawnHeart(x, z) {
 
 function damageEnemy(e, dmg, dx, dz) {
   const d = Math.hypot(dx, dz) || 1;
-  e.hp -= dmg; e.flash = 0.18; e.stun = 0.35; e.kx = dx / d * 7; e.kz = dz / d * 7;
+  e.hp -= dmg; sfx.hit(); e.flash = 0.18; e.stun = 0.35; e.kx = dx / d * 7; e.kz = dz / d * 7;
   if (e.state === 'windup') e.state = 'chase';
   spawnFx(e.x, 1.1, e.z, 0xe8e0c8, 6);
   e.bar.visible = true; e.bar.scale.x = Math.max(0.01, e.hp / e.maxHp);
   if (e.hp <= 0) {
-    e.state = 'dead'; e.deadT = 0; e.respawnT = 30;
+    e.state = 'dead'; e.deadT = 0; e.respawnT = 30; sfx.skelDie();
     spawnFx(e.x, 1.0, e.z, 0xe8e0c8, 10); spawnFx(e.x, 1.0, e.z, 0xff3b5c, 4);
     e.bone.emissive.setHex(0x000000);
     if (rnd() < 0.45) spawnHeart(e.x, e.z);
@@ -1078,7 +1083,7 @@ function applyHits() {
 }
 function attack() {
   if (talking || transitioning || world !== 'outside' || combat.cd > 0 || combat.dead) return;
-  combat.cd = 0.5; combat.atkT = 0.0001; combat.hit = false;
+  combat.cd = 0.5; combat.atkT = 0.0001; combat.hit = false; sfx.swing();
   let best = null, bd = 3.2; // soft aim at the nearest enemy
   for (const e of enemies) { if (e.state === 'dead') continue; const d = Math.hypot(e.x - pPos.x, e.z - pPos.y); if (d < bd) { bd = d; best = e; } }
   if (best) facing = Math.atan2(best.x - pPos.x, best.z - pPos.y);
@@ -1090,7 +1095,7 @@ function hurtPlayer(n, fx_, fz_) {
   combat.hp = Math.max(0, combat.hp - n); combat.inv = 1.1;
   const dx = pPos.x - fx_, dz = pPos.y - fz_, d = Math.hypot(dx, dz) || 1;
   pk.set(dx / d * 7, dz / d * 7);
-  renderHearts(); hurtEl.classList.add('on'); setTimeout(() => hurtEl.classList.remove('on'), 220);
+  sfx.hurt(); renderHearts(); hurtEl.classList.add('on'); setTimeout(() => hurtEl.classList.remove('on'), 220);
   spawnFx(pPos.x, 1, pPos.y, 0xff3b5c, 6);
   if (combat.hp <= 0) playerDie();
 }
@@ -1183,11 +1188,12 @@ function updateCombat(dt, t) {
       }
     } else if (e.state === 'chase') {
       if (!playerHere || dist > 16 || combat.hp <= 0) e.state = 'return';
-      else if (dist < 1.35) { e.state = 'windup'; e.t = 0; }
+      else if (dist < 1.35) { e.state = 'windup'; e.t = 0; sfx.rattle(); }
       else stepTo(e, pPos.x, pPos.y, 2.8, dt);
     } else if (e.state === 'windup') {
       e.face = Math.atan2(dx, dz); armT = -1.6;
       if (e.t > 0.55) {
+        sfx.skelSwing();
         if (dist < 1.9) hurtPlayer(1, e.x, e.z);
         e.state = 'recover'; e.t = 0;
       }
@@ -1243,7 +1249,7 @@ function castSpell() {
   if (talking || transitioning || world !== 'outside' || combat.dead || spell.cd > 0 || spell.t >= 0) return;
   spell.cd = spell.cdMax; spell.t = 0; spell.x = pPos.x; spell.z = pPos.y; spell.hit.clear();
   nova.position.set(spell.x, heightAt(spell.x, spell.z) + 0.25, spell.z); nova.visible = true;
-  spawnFx(spell.x, 1, spell.z, 0xcdeaff, 8);
+  spawnFx(spell.x, 1, spell.z, 0xcdeaff, 8); sfx.nova();
 }
 spellBtn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); castSpell(); });
 
@@ -1276,7 +1282,189 @@ function updateSpell(dt, t) {
   if (p >= 1) { spell.t = -1; nova.visible = false; novaLight.intensity = 0; }
 }
 
-window.__spookie = { castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+// ---------- audio: procedural music + sound effects (Web Audio, no asset files) ----------
+const audio = { ctx: null, muted: false, mood: '', chordIdx: 0, t: { chord: 0, bell: 3, crackle: 0 } };
+try { audio.muted = localStorage.getItem('spookie-muted') === '1'; } catch (e) { /* storage unavailable */ }
+const soundBtn = $('sound');
+function renderSoundBtn() { soundBtn.classList.toggle('muted', audio.muted); soundBtn.title = audio.muted ? 'Sound off (M)' : 'Sound on (M)'; }
+renderSoundBtn();
+function setMuted(m) {
+  audio.muted = m;
+  try { localStorage.setItem('spookie-muted', m ? '1' : '0'); } catch (e) { /* ignore */ }
+  if (audio.master) audio.master.gain.setTargetAtTime(m ? 0 : 0.6, audio.ctx.currentTime, 0.05);
+  renderSoundBtn();
+}
+soundBtn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); initAudio(); setMuted(!audio.muted); });
+
+const MOODS = {
+  out:    { chords: [[110, 130.81, 164.81], [87.31, 130.81, 174.61], [130.81, 164.81, 196], [82.41, 123.47, 164.81]], bells: [440, 523.25, 587.33, 659.25, 783.99, 880, 466.16] },
+  hollow: { chords: [[110, 116.54, 164.81], [98, 146.83, 155.56], [110, 138.59, 185]], bells: [440, 466.16, 622.25, 659.25, 830.61, 311.13] },
+  house:  { chords: [[110, 138.59, 164.81], [146.83, 185, 220], [164.81, 207.65, 246.94], [110, 164.81, 220]], bells: [440, 554.37, 659.25, 739.99, 880, 987.77, 220] },
+};
+
+function initAudio() {
+  if (audio.ctx) { if (audio.ctx.state === 'suspended') audio.ctx.resume(); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  let ctx; try { ctx = new AC(); } catch (e) { return; }
+  audio.ctx = ctx;
+  const master = ctx.createGain(); master.gain.value = audio.muted ? 0 : 0.6; master.connect(ctx.destination); audio.master = master;
+  const comp = ctx.createDynamicsCompressor(); comp.connect(master);
+  // reverb from generated noise
+  const len = Math.floor(ctx.sampleRate * 2.6), ir = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.4); }
+  const rev = ctx.createConvolver(); rev.buffer = ir;
+  const revG = ctx.createGain(); revG.gain.value = 0.55; rev.connect(revG); revG.connect(comp);
+  // shared noise buffer
+  const nb = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate), nd = nb.getChannelData(0);
+  for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  audio.noise = nb;
+  audio.sfx = ctx.createGain(); audio.sfx.gain.value = 0.9; audio.sfx.connect(comp);
+  audio.jb = ctx.createGain(); audio.jb.gain.value = 0.9; audio.jb.connect(comp); audio.jb.connect(rev); // jingle bus
+  const L = audio.L = {};
+  const mk = () => { const g = ctx.createGain(); g.gain.value = 0; g.connect(comp); return g; };
+  // drone: two detuned saws + sub, slowly breathing low-pass
+  L.drone = mk();
+  const dl = ctx.createBiquadFilter(); dl.type = 'lowpass'; dl.frequency.value = 220; dl.connect(L.drone);
+  for (const [f, type, v] of [[55, 'sawtooth', 0.5], [55.4, 'sawtooth', 0.5], [27.5, 'sine', 0.9]]) {
+    const o = ctx.createOscillator(); o.type = type; o.frequency.value = f;
+    const g = ctx.createGain(); g.gain.value = v * 0.35; o.connect(g); g.connect(dl); o.start();
+  }
+  const lfo = ctx.createOscillator(); lfo.frequency.value = 0.07; const lg = ctx.createGain(); lg.gain.value = 90; lfo.connect(lg); lg.connect(dl.frequency); lfo.start();
+  // pad: three triangles gliding between chords
+  L.pad = mk();
+  const pf = ctx.createBiquadFilter(); pf.type = 'lowpass'; pf.frequency.value = 900; pf.connect(L.pad);
+  audio.padOsc = [0, 1, 2].map(() => { const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = 110; const g = ctx.createGain(); g.gain.value = 0.25; o.connect(g); g.connect(pf); o.start(); return o; });
+  // tension: throbbing low square + tritone
+  L.tension = mk();
+  const tf = ctx.createBiquadFilter(); tf.type = 'lowpass'; tf.frequency.value = 300; tf.connect(L.tension);
+  const pg = ctx.createGain(); pg.gain.value = 0.5; pg.connect(tf);
+  const po = ctx.createOscillator(); po.type = 'square'; po.frequency.value = 55; po.connect(pg); po.start();
+  const pl = ctx.createOscillator(); pl.frequency.value = 1.3; const plg = ctx.createGain(); plg.gain.value = 0.5; pl.connect(plg); plg.connect(pg.gain); pl.start();
+  for (const f of [311.13, 440]) { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; const g = ctx.createGain(); g.gain.value = 0.04; o.connect(g); g.connect(L.tension); o.start(); }
+  // wind: band-passed noise with a drifting centre
+  L.wind = mk();
+  const ws = ctx.createBufferSource(); ws.buffer = nb; ws.loop = true;
+  const wb = ctx.createBiquadFilter(); wb.type = 'bandpass'; wb.frequency.value = 500; wb.Q.value = 0.5;
+  ws.connect(wb); wb.connect(L.wind); ws.start();
+  const wl = ctx.createOscillator(); wl.frequency.value = 0.11; const wlg = ctx.createGain(); wlg.gain.value = 250; wl.connect(wlg); wlg.connect(wb.frequency); wl.start();
+  // ghost hum: two close sines with vibrato
+  L.ghost = mk();
+  const gf = ctx.createBiquadFilter(); gf.type = 'lowpass'; gf.frequency.value = 600; gf.connect(L.ghost);
+  const gl = ctx.createOscillator(); gl.frequency.value = 5; const glg = ctx.createGain(); glg.gain.value = 4; gl.connect(glg); gl.start();
+  for (const f of [196, 198]) { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; glg.connect(o.frequency); const g = ctx.createGain(); g.gain.value = 0.5; o.connect(g); g.connect(gf); o.start(); }
+  // music-box bells bus
+  L.bell = mk(); L.bell.connect(rev);
+  audio.mood = ''; audio.t.chord = 0;
+  document.addEventListener('visibilitychange', () => { if (!audio.ctx) return; if (document.hidden) audio.ctx.suspend(); else audio.ctx.resume(); });
+}
+['pointerdown', 'keydown'].forEach(ev => addEventListener(ev, initAudio, { passive: true }));
+
+// --- sound building blocks ---
+function tone(f, dur, type = 'sine', vol = 0.2, f2 = null, delay = 0, dest = null) {
+  const ctx = audio.ctx, t0 = ctx.currentTime + delay;
+  const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, t0);
+  if (f2) o.frequency.exponentialRampToValueAtTime(f2, t0 + dur);
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(dest || audio.sfx); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function noise(dur, type, f1, f2, vol, delay = 0, q = 1) {
+  const ctx = audio.ctx, t0 = ctx.currentTime + delay;
+  const src = ctx.createBufferSource(); src.buffer = audio.noise;
+  const fl = ctx.createBiquadFilter(); fl.type = type; fl.frequency.setValueAtTime(f1, t0); fl.Q.value = q;
+  if (f2) fl.frequency.exponentialRampToValueAtTime(f2, t0 + dur);
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + Math.min(0.01, dur / 3)); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(fl); fl.connect(g); g.connect(audio.sfx); src.start(t0, Math.random() * 1.5, dur + 0.05);
+}
+function bell(f, vol = 0.2, delay = 0, bus = null) {
+  const ctx = audio.ctx, t0 = ctx.currentTime + delay, out = bus || audio.L.bell;
+  for (const [m, a, d] of [[1, 1, 2.4], [2.01, 0.35, 1.4], [3.0, 0.12, 0.8]]) {
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f * m;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol * a, t0 + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
+    o.connect(g); g.connect(out); o.start(t0); o.stop(t0 + d + 0.05);
+  }
+}
+const sfxImpl = {
+  step(w) {
+    if (w === 'house') { tone(95, 0.08, 'sine', 0.08, 60); noise(0.05, 'bandpass', 300, null, 0.05); }
+    else noise(0.07, 'lowpass', 500 + Math.random() * 200, 250, 0.06);
+  },
+  swing() { noise(0.18, 'bandpass', 800, 2600, 0.22, 0, 1.5); },
+  hit() { noise(0.1, 'lowpass', 1600, null, 0.28); tone(150, 0.12, 'square', 0.16, 60); },
+  skelDie() { for (let i = 0; i < 6; i++) noise(0.04, 'highpass', 1800 + Math.random() * 1500, null, 0.18, i * 0.045); tone(90, 0.3, 'sine', 0.2, 45, 0.05); },
+  hurt() { tone(190, 0.3, 'sawtooth', 0.28, 70); noise(0.2, 'lowpass', 500, null, 0.25); },
+  rattle() { for (let i = 0; i < 6; i++) noise(0.03, 'highpass', 2200, null, 0.1, i * 0.07); },
+  skelSwing() { noise(0.15, 'bandpass', 600, 1800, 0.14, 0, 1.2); },
+  nova() {
+    tone(300, 0.75, 'sine', 0.22, 1900); tone(450, 0.75, 'triangle', 0.1, 2400);
+    noise(0.7, 'highpass', 600, 5000, 0.14);
+    for (const [f, d] of [[880, 0.05], [1318.5, 0.12], [1760, 0.2]]) bell(f, 0.14, d, audio.jb);
+  },
+  soul() { [659.25, 880, 1318.5].forEach((f, i) => bell(f, 0.2, i * 0.09, audio.jb)); },
+  ore() { tone(1400, 0.18, 'triangle', 0.18); tone(2100, 0.14, 'triangle', 0.1, null, 0.07); noise(0.04, 'highpass', 4000, null, 0.1); },
+  heart() { tone(520, 0.12, 'sine', 0.18, 660); tone(780, 0.2, 'sine', 0.18, 980, 0.1); },
+  questStart() { [440, 523.25, 659.25].forEach((f, i) => bell(f, 0.22, i * 0.14, audio.jb)); },
+  questDone() { [659.25, 880, 1046.5, 1318.5].forEach((f, i) => bell(f, 0.24, i * 0.13, audio.jb)); tone(110, 1.2, 'triangle', 0.14, null, 0.1); },
+  door() { tone(80, 0.5, 'sawtooth', 0.1, 150); noise(0.45, 'bandpass', 250, 500, 0.08, 0, 4); tone(70, 0.12, 'sine', 0.2, 45, 0.45); },
+  clang() { for (const [f, v] of [[700, 0.12], [1130, 0.1], [1800, 0.07], [2900, 0.05]]) tone(f, 0.45, 'sine', v); noise(0.03, 'highpass', 3000, null, 0.12); },
+  blip(npc) { const base = npc === smith.group ? 105 : npc ? 170 : 140; tone(base * (0.9 + Math.random() * 0.4), 0.05, 'square', 0.045); },
+  chill() { noise(0.6, 'lowpass', 1200, 200, 0.14); tone(600, 0.5, 'sine', 0.09, 200); },
+  defeat() { [330, 247, 185, 139].forEach((f, i) => tone(f, 0.5, 'triangle', 0.18, null, i * 0.2)); },
+  horn() { tone(73, 1.4, 'sawtooth', 0.14, 69); tone(110, 1.4, 'sawtooth', 0.07, 104); },
+};
+const sfx = {};
+for (const k of Object.keys(sfxImpl)) sfx[k] = (...a) => { if (audio.ctx && !audio.muted && audio.ctx.state === 'running') { try { sfxImpl[k](...a); } catch (e) { /* never break the game over audio */ } } };
+function sfxForToast(m) { // play a matching sound for a toast message
+  if (m.startsWith('Quest started')) sfx.questStart();
+  else if (m.startsWith('Quest complete')) sfx.questDone();
+  else if (m.startsWith('Soul collected') || m.startsWith('All souls')) sfx.soul();
+  else if (m.startsWith('Iron ore') || m.startsWith('All ore')) sfx.ore();
+  else if (m === '+1 heart') sfx.heart();
+  else if (m.startsWith('A cold chill')) sfx.chill();
+  else if (m.startsWith('You were defeated')) sfx.defeat();
+  else if (m.startsWith('The Blighted')) sfx.horn();
+}
+
+function updateAudio(dt) {
+  const ctx = audio.ctx;
+  if (!ctx || ctx.state !== 'running') return;
+  const now = ctx.currentTime, L = audio.L, out = world === 'outside', house = world === 'house', inH = out && combat.inside;
+  const mood = house ? 'house' : inH ? 'hollow' : 'out';
+  let chasing = 0;
+  if (out) for (const e of enemies) if (e.state === 'chase' || e.state === 'windup') chasing++;
+  const set = (g, v, tc = 0.8) => g.gain.setTargetAtTime(v, now, tc);
+  set(L.drone, house ? 0.2 : inH ? 0.5 : 0.36);
+  set(L.pad, house ? 0.16 : inH ? 0.05 : 0.13);
+  set(L.bell, house ? 0.5 : inH ? 0.2 : 0.42);
+  set(L.tension, inH ? Math.min(0.7, 0.3 + chasing * 0.1) : 0, 0.6);
+  set(L.wind, house ? 0.03 : inH ? 0.18 : 0.26);
+  let gd = 99; if (out) for (const g of ghosts) gd = Math.min(gd, Math.hypot(g.position.x - pPos.x, g.position.z - pPos.y));
+  set(L.ghost, out ? Math.max(0, 1 - gd / 9) * 0.12 : 0, 0.3);
+  if (mood !== audio.mood) { audio.mood = mood; audio.t.chord = 0; audio.t.bell = 1.2; }
+  const M_ = MOODS[mood];
+  audio.t.chord -= dt;
+  if (audio.t.chord <= 0) {
+    audio.t.chord = 11; audio.chordIdx = (audio.chordIdx + 1) % M_.chords.length;
+    audio.padOsc.forEach((o, i) => o.frequency.setTargetAtTime(M_.chords[audio.chordIdx][i], now, 1.8));
+  }
+  audio.t.bell -= dt;
+  if (audio.t.bell <= 0) {
+    audio.t.bell = (house ? 3 : 2.2) + Math.random() * 3.5;
+    const f = M_.bells[Math.floor(Math.random() * M_.bells.length)];
+    bell(f, 0.2); if (Math.random() < 0.35) bell(M_.bells[Math.floor(Math.random() * M_.bells.length)], 0.15, 0.35);
+  }
+  // fire crackle: louder near the campfire / hollow brazier, constant by the forge
+  let cv = 0;
+  if (house) cv = 0.5;
+  else if (out) {
+    const d1 = Math.hypot(FIRE.x - pPos.x, FIRE.z - pPos.y), d2 = Math.hypot(HOLLOW.x - pPos.x, HOLLOW.z - pPos.y);
+    cv = Math.max(Math.pow(Math.max(0, 1 - d1 / 14), 2) * 0.55, Math.pow(Math.max(0, 1 - d2 / 12), 2) * 0.3);
+  }
+  audio.t.crackle += dt * 30 * cv;
+  while (audio.t.crackle >= 1) { audio.t.crackle -= 1; noise(0.03 + Math.random() * 0.04, 'highpass', 1200 + Math.random() * 3000, null, 0.05 + cv * 0.12); }
+}
+
+window.__spookie = { sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -1290,7 +1478,7 @@ dispatchEvent(new Event('resize'));
 const clock = new THREE.Clock();
 const SPEED = 6;
 const GHOST_SLOW = 0.4, GHOST_SLOW_TIME = 2, GHOST_HIT_R = 0.9; // walking through a ghost slows you for 2s
-let slowT = 0;
+let slowT = 0, lastStep = 0;
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
 
@@ -1313,6 +1501,8 @@ function tick() {
     let d = target - facing; d = Math.atan2(Math.sin(d), Math.cos(d));
     facing += d * Math.min(1, dt * 14);
     walkT += dt * 11 * mag * (slowed ? GHOST_SLOW : 1);
+    const stepIdx = Math.floor(walkT / Math.PI);
+    if (stepIdx !== lastStep) { lastStep = stepIdx; sfx.step(world); }
   }
   // collisions
   for (const c of world === 'house' ? houseColliders : colliders) {
@@ -1376,6 +1566,7 @@ function tick() {
   updateHouse(dt, t);
   updateCombat(dt, t);
   updateSpell(dt, t);
+  updateAudio(dt);
 
   // follow camera
   camTarget.set(player.position.x, player.position.y, player.position.z);
