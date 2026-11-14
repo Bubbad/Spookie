@@ -1306,15 +1306,22 @@ function initAudio() {
   if (audio.ctx) { if (audio.ctx.state === 'suspended') audio.ctx.resume(); return; }
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return;
-  let ctx; try { ctx = new AC(); } catch (e) { return; }
+  let ctx; // 'playback' = bigger audio buffer: far fewer crackles/dropouts on phones that are busy drawing 3D
+  try { ctx = new AC({ latencyHint: 'playback' }); } catch (e) { try { ctx = new AC(); } catch (e2) { return; } }
   audio.ctx = ctx;
   const master = ctx.createGain(); master.gain.value = audio.muted ? 0 : 0.6; master.connect(ctx.destination); audio.master = master;
   const comp = ctx.createDynamicsCompressor(); comp.connect(master);
-  // reverb from generated noise
-  const len = Math.floor(ctx.sampleRate * 1.8), ir = ctx.createBuffer(2, len, ctx.sampleRate);
-  for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.4); }
-  const rev = ctx.createConvolver(); rev.buffer = ir;
-  const revG = ctx.createGain(); revG.gain.value = 0.55; rev.connect(revG); revG.connect(comp);
+  // reverb: four feedback delay lines (cheap) smeared by two all-pass filters
+  const rev = ctx.createGain(), revMix = ctx.createGain(); revMix.gain.value = 0.07;
+  for (const [dt, fb] of [[0.043, 0.74], [0.057, 0.72], [0.071, 0.7], [0.089, 0.68]]) {
+    const dl = ctx.createDelay(0.2); dl.delayTime.value = dt;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2400;
+    const fg = ctx.createGain(); fg.gain.value = fb;
+    rev.connect(dl); dl.connect(lp); lp.connect(fg); fg.connect(dl); dl.connect(revMix);
+  }
+  let tail = revMix;
+  for (const f of [700, 1900]) { const ap = ctx.createBiquadFilter(); ap.type = 'allpass'; ap.frequency.value = f; tail.connect(ap); tail = ap; }
+  tail.connect(comp);
   // shared noise buffer
   const nb = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate), nd = nb.getChannelData(0);
   for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
