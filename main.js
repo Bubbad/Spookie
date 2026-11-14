@@ -1342,12 +1342,27 @@ function initAudio() {
   const po = ctx.createOscillator(); po.type = 'square'; po.frequency.value = 55; po.connect(pg); po.start();
   const pl = ctx.createOscillator(); pl.frequency.value = 1.3; const plg = ctx.createGain(); plg.gain.value = 0.5; pl.connect(plg); plg.connect(pg.gain); pl.start();
   for (const f of [311.13, 440]) { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; const g = ctx.createGain(); g.gain.value = 0.04; o.connect(g); g.connect(L.tension); o.start(); }
-  // wind: band-passed noise with a drifting centre
+  // wind: deep brown-noise rumble with slow random gusts, plus a faint drifting howl
+  const bn = 8 * ctx.sampleRate, ov = Math.floor(0.6 * ctx.sampleRate), raw = new Float32Array(bn + ov);
+  for (let i = 0, last = 0; i < raw.length; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; raw[i] = last * 3.5; }
+  const brown = ctx.createBuffer(1, bn, ctx.sampleRate), bd = brown.getChannelData(0);
+  for (let i = 0; i < bn; i++) bd[i] = i < ov ? raw[i] * (i / ov) + raw[bn + i] * (1 - i / ov) : raw[i]; // seamless loop
   L.wind = mk();
-  const ws = ctx.createBufferSource(); ws.buffer = nb; ws.loop = true;
-  const wb = ctx.createBiquadFilter(); wb.type = 'bandpass'; wb.frequency.value = 500; wb.Q.value = 0.5;
-  ws.connect(wb); wb.connect(L.wind); ws.start();
-  const wl = ctx.createOscillator(); wl.frequency.value = 0.11; const wlg = ctx.createGain(); wlg.gain.value = 250; wl.connect(wlg); wlg.connect(wb.frequency); wl.start();
+  const lfoTo = (hz, depth, param) => { const o = ctx.createOscillator(); o.frequency.value = hz; const g = ctx.createGain(); g.gain.value = depth; o.connect(g); g.connect(param); o.start(); };
+  // rumble layer
+  const rs = ctx.createBufferSource(); rs.buffer = brown; rs.loop = true;
+  const rf = ctx.createBiquadFilter(); rf.type = 'lowpass'; rf.frequency.value = 320; rf.Q.value = 0.4;
+  const rg = ctx.createGain(); rg.gain.value = 0.55;
+  lfoTo(0.067, 0.3, rg.gain); lfoTo(0.113, 0.2, rg.gain);       // two slow LFOs make irregular gusts
+  lfoTo(0.05, 90, rf.frequency);                                // the rumble opens up in stronger gusts
+  rs.connect(rf); rf.connect(rg); rg.connect(L.wind); rs.start(0, 0);
+  // howl layer: narrow resonance sweeping slowly, only audible in the gusts
+  const hs = ctx.createBufferSource(); hs.buffer = brown; hs.loop = true;
+  const hf = ctx.createBiquadFilter(); hf.type = 'bandpass'; hf.frequency.value = 650; hf.Q.value = 9;
+  const hg = ctx.createGain(); hg.gain.value = 0.18;
+  lfoTo(0.043, 220, hf.frequency); lfoTo(0.097, 110, hf.frequency);
+  lfoTo(0.067, 0.12, hg.gain); lfoTo(0.113, 0.08, hg.gain);
+  hs.connect(hf); hf.connect(hg); hg.connect(L.wind); hs.start(0, 3.1);
   // ghost hum: two close sines with vibrato
   L.ghost = mk();
   const gf = ctx.createBiquadFilter(); gf.type = 'lowpass'; gf.frequency.value = 600; gf.connect(L.ghost);
@@ -1437,7 +1452,7 @@ function updateAudio(dt) {
   set(L.pad, house ? 0.16 : inH ? 0.05 : 0.13);
   set(L.bell, house ? 0.5 : inH ? 0.2 : 0.42);
   set(L.tension, inH ? Math.min(0.7, 0.3 + chasing * 0.1) : 0, 0.6);
-  set(L.wind, house ? 0.03 : inH ? 0.18 : 0.26);
+  set(L.wind, house ? 0.04 : inH ? 0.3 : 0.4);
   let gd = 99; if (out) for (const g of ghosts) gd = Math.min(gd, Math.hypot(g.position.x - pPos.x, g.position.z - pPos.y));
   set(L.ghost, out ? Math.max(0, 1 - gd / 9) * 0.12 : 0, 0.3);
   if (mood !== audio.mood) { audio.mood = mood; audio.t.chord = 0; audio.t.bell = 1.2; }
