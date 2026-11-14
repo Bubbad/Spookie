@@ -53779,7 +53779,7 @@ scene.add(player);
 
 const pPos = new THREE.Vector2(0, 0);
 let facing = 0, walkT = 0;
-const camTarget = new THREE.Vector3();
+const camTarget = new THREE.Vector3(), camWant = new THREE.Vector3();
 camera.position.copy(CAM_OFFSET);
 camera.lookAt(0, 0, 0);
 
@@ -54460,7 +54460,7 @@ function initAudio() {
   const master = ctx.createGain(); master.gain.value = audio.muted ? 0 : 0.6; master.connect(ctx.destination); audio.master = master;
   const comp = ctx.createDynamicsCompressor(); comp.connect(master);
   // reverb from generated noise
-  const len = Math.floor(ctx.sampleRate * 2.6), ir = ctx.createBuffer(2, len, ctx.sampleRate);
+  const len = Math.floor(ctx.sampleRate * 1.8), ir = ctx.createBuffer(2, len, ctx.sampleRate);
   for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.4); }
   const rev = ctx.createConvolver(); rev.buffer = ir;
   const revG = ctx.createGain(); revG.gain.value = 0.55; rev.connect(revG); revG.connect(comp);
@@ -54607,7 +54607,10 @@ function updateAudio(dt) {
   const mood = house ? 'house' : inH ? 'hollow' : 'out';
   let chasing = 0;
   if (out) for (const e of enemies) if (e.state === 'chase' || e.state === 'windup') chasing++;
-  const set = (g, v, tc = 0.8) => g.gain.setTargetAtTime(v, now, tc);
+  const set = (g, v, tc = 0.8) => { // skip no-op updates: calling this every frame floods the audio thread with events
+    if (g._v !== undefined && (Math.abs(g._v - v) < 0.005 || now - g._at < 0.1)) return;
+    g._v = v; g._at = now; g.gain.setTargetAtTime(v, now, tc);
+  };
   set(L.drone, house ? 0.2 : inH ? 0.5 : 0.36);
   set(L.pad, house ? 0.16 : inH ? 0.05 : 0.13);
   set(L.bell, house ? 0.5 : inH ? 0.2 : 0.42);
@@ -54635,14 +54638,14 @@ function updateAudio(dt) {
     const d1 = Math.hypot(FIRE.x - pPos.x, FIRE.z - pPos.y), d2 = Math.hypot(HOLLOW.x - pPos.x, HOLLOW.z - pPos.y);
     cv = Math.max(Math.pow(Math.max(0, 1 - d1 / 16), 2) * 0.9, Math.pow(Math.max(0, 1 - d2 / 12), 2) * 0.5);
   }
-  audio.fireG.gain.setTargetAtTime(cv, now, 0.25);
+  set(audio.fireG, cv, 0.25);
   if (cv > 0.03) {
     audio.t.crackle -= dt;
     if (audio.t.crackle <= 0) { crackle(); audio.t.crackle = -Math.log(1 - Math.random()) * 0.11 + 0.02; }
   }
 }
 
-window.__spookie = { sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+window.__spookie = { updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -54748,7 +54751,7 @@ function tick() {
 
   // follow camera
   camTarget.set(player.position.x, player.position.y, player.position.z);
-  const want = camTarget.clone().add(CAM_OFFSET);
+  const want = camWant.copy(camTarget).add(CAM_OFFSET);
   camera.position.lerp(want, 1 - Math.exp(-dt * 6));
   camera.lookAt(camera.position.x - CAM_OFFSET.x, camTarget.y, camera.position.z - CAM_OFFSET.z);
 
