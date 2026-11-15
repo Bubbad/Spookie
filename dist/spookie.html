@@ -53240,6 +53240,7 @@ buildTerrain();
 
 // ---------- props ----------
 const colliders = []; // circle {x, z, r} or box {x, z, hw, hd}
+const treeObjs = []; // dead trees (crows perch on them)
 const interactables = []; // {world, getPos, r, label, act}
 const avoid = [{ x: HOUSE.x, z: HOUSE.z + HOUSE.hd + 3, r: 3.2 }]; // keep props off the porch
 const flickers = [];  // lights that flicker
@@ -53249,6 +53250,7 @@ function place(obj, x, z, r) {
   obj.position.set(x, heightAt(x, z), z);
   obj.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   scene.add(obj);
+  if (obj.userData.isTree) treeObjs.push(obj);
   if (r) colliders.push({ x, z, r });
 }
 const spot = (minR = 4, maxR = WORLD_R - 3) => {
@@ -53273,6 +53275,7 @@ function deadTree() {
     t.add(b);
   }
   t.rotation.y = rnd() * 6.28;
+  t.userData.isTree = true; t.userData.topY = h;
   return t;
 }
 
@@ -54505,6 +54508,91 @@ function updateBunnies(dt, t) {
   }
 }
 
+// ---------- crows: perch on dead trees, fly off when you come close, glide back later ----------
+const crows = [];
+const CROW_SCARE_R = 5.5;
+function makeCrow() {
+  const g = new THREE.Group(), feather = mat(0x18141f, { emissive: 0x2a2040, emissiveIntensity: 0.5 }), beakM = mat(0x4a4650);
+  const red = new THREE.MeshBasicMaterial({ color: 0xff3030 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.17, 6, 5), feather); body.scale.set(0.9, 0.85, 1.5); body.position.y = 0.18; g.add(body);
+  const head = new THREE.Group(); head.position.set(0, 0.3, 0.2); g.add(head);
+  head.add(new THREE.Mesh(new THREE.SphereGeometry(0.1, 6, 5), feather));
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.2, 4), beakM); beak.rotation.x = Math.PI / 2; beak.position.set(0, -0.01, 0.15); head.add(beak);
+  box(0.03, 0.03, 0.02, red, -0.055, 0.03, 0.08, head); box(0.03, 0.03, 0.02, red, 0.055, 0.03, 0.08, head);
+  const tail = box(0.14, 0.03, 0.3, feather, 0, 0.14, -0.34, g); tail.rotation.x = 0.25;
+  const wings = [];
+  for (const sx of [-1, 1]) {
+    const w = new THREE.Group(); w.position.set(sx * 0.12, 0.22, 0.02); g.add(w);
+    box(0.5, 0.03, 0.26, feather, sx * 0.25, 0, 0, w); wings.push(w);
+  }
+  g.scale.setScalar(1.5); // chunky enough to read from the top-down camera
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return { g, head, wings };
+}
+function crowPose(c, a) { c.wings[0].rotation.z = -a; c.wings[1].rotation.z = a; } // a>0 raises the wing tips
+function crowTreeTop(tr) { return { x: tr.position.x, y: tr.position.y + tr.userData.topY + 0.1, z: tr.position.z }; }
+function freeTree(minPlayerDist) {
+  const taken = new Set(crows.map(c => c.tree));
+  const pool = treeObjs.filter(t => !taken.has(t) && Math.hypot(t.position.x - pPos.x, t.position.z - pPos.y) > minPlayerDist && Math.hypot(t.position.x, t.position.z) > 6);
+  return pool.length ? pool[Math.floor(rnd() * pool.length)] : null;
+}
+function perchCrow(c, tr) {
+  c.tree = tr; const p = crowTreeTop(tr); c.x = p.x; c.y = p.y; c.z = p.z; c.state = 'perch'; c.t = 0; c.g.visible = true;
+}
+for (let i = 0; i < 6; i++) {
+  const tr = freeTree(0); if (!tr) break;
+  const k = makeCrow();
+  const c = Object.assign(k, { tree: null, x: 0, y: 0, z: 0, state: 'perch', t: 0, face: rnd() * 6.28, ph: rnd() * 6, gone: 0, cawT: rr(8, 25) });
+  perchCrow(c, tr); c.g.position.set(c.x, c.y, c.z); c.g.rotation.y = c.face; scene.add(c.g); crows.push(c);
+}
+function updateCrows(dt, t) {
+  if (world !== 'outside') return;
+  for (const c of crows) {
+    const px = pPos.x - c.x, pz = pPos.y - c.z, pd = Math.hypot(px, pz), g = c.g;
+    c.t += dt;
+    if (c.state === 'perch') {
+      const scared = pd < CROW_SCARE_R || (spell.t >= 0 && Math.hypot(c.x - spell.x, c.z - spell.z) < 8) || (combat.atkT > 0 && pd < 7);
+      if (scared) { // burst into flight, away from the threat
+        const d = pd || 1, a = Math.atan2(-pz, -px) + rr(-0.5, 0.5);
+        c.state = 'flee'; c.t = 0; c.vx = Math.cos(a) * 6.5; c.vz = Math.sin(a) * 6.5; c.tree = null; c.face = Math.atan2(c.vx, c.vz);
+        spawnFx(c.x, c.y + 0.2, c.z, 0x2a2040, 6); if (pd < 22) sfx.caw(0.12 * (1 - pd / 22));
+      } else {
+        c.cawT -= dt; if (c.cawT <= 0) { c.cawT = rr(12, 30); if (pd < 22) sfx.caw(0.09 * (1 - pd / 22)); }
+        if (pd < 11) c.face = Math.atan2(px, pz); else c.face += Math.sin(t * 0.3 + c.ph) * dt * 0.4; // watch the player
+        crowPose(c, -1.35 + Math.sin(t * 1.2 + c.ph) * 0.03);
+        g.rotation.x += (-0.55 - g.rotation.x) * Math.min(1, dt * 10);
+        c.head.rotation.y = Math.sin(t * 0.7 + c.ph) * 0.5 * (pd < 11 ? 0.3 : 1); c.head.rotation.x = Math.sin(t * 0.5 + c.ph * 2) > 0.8 ? 0.3 : 0;
+      }
+    } else if (c.state === 'flee') {
+      const lat = Math.sin(c.t * 2.2 + c.ph) * 1.3;
+      c.x += c.vx * dt - c.vz * 0.15 * lat * dt; c.z += c.vz * dt + c.vx * 0.15 * lat * dt;
+      c.y += (c.t < 0.7 ? 4 : 2.4) * dt;
+      c.face = Math.atan2(c.vx, c.vz) + lat * 0.08;
+      crowPose(c, 0.15 + Math.sin(t * 28 + c.ph) * 0.95);
+      g.rotation.x += (0.35 - g.rotation.x) * Math.min(1, dt * 6); c.head.rotation.set(0, 0, 0);
+      if (c.t > 5.5 || Math.hypot(c.x, c.z) > WALK_R + 16) { c.state = 'gone'; c.gone = rr(25, 50); g.visible = false; }
+    } else if (c.state === 'gone') {
+      c.gone -= dt;
+      if (c.gone <= 0) {
+        const tr = freeTree(14);
+        if (tr) { // come back in from a random direction and glide onto the tree
+          const p = crowTreeTop(tr), a = rnd() * Math.PI * 2;
+          c.tree = tr; c.sx = p.x + Math.cos(a) * 22; c.sz = p.z + Math.sin(a) * 22; c.sy = p.y + 10; c.px = p.x; c.py = p.y; c.pz = p.z;
+          c.state = 'land'; c.t = 0; c.dur = 3.4; c.x = c.sx; c.y = c.sy; c.z = c.sz; g.visible = true;
+        } else c.gone = 5;
+      }
+    } else if (c.state === 'land') {
+      const u = Math.min(1, c.t / c.dur), e = u * u * (3 - 2 * u), nx = c.sx + (c.px - c.sx) * e, nz = c.sz + (c.pz - c.sz) * e;
+      c.face = Math.atan2(nx - c.x, nz - c.z) || c.face; c.x = nx; c.z = nz; c.y = c.sy + (c.py - c.sy) * e;
+      crowPose(c, u < 0.78 ? 0.25 + Math.sin(t * 6 + c.ph) * 0.2 : 0.2 + Math.sin(t * 26 + c.ph) * 0.95); // glide, then flare with fast wingbeats
+      g.rotation.x += ((u < 0.78 ? 0.2 : -0.5) - g.rotation.x) * Math.min(1, dt * 6);
+      if (u >= 1) perchCrow(c, c.tree);
+    }
+    g.position.set(c.x, c.y, c.z);
+    g.rotation.y += Math.atan2(Math.sin(c.face - g.rotation.y), Math.cos(c.face - g.rotation.y)) * Math.min(1, dt * 8);
+  }
+}
+
 // ---------- audio: procedural music + sound effects (Web Audio, no asset files) ----------
 const audio = { ctx: null, muted: false, mood: '', chordIdx: 0, t: { chord: 0, bell: 3, crackle: 0 } };
 try { audio.muted = localStorage.getItem('spookie-muted') === '1'; } catch (e) { /* storage unavailable */ }
@@ -54637,6 +54725,7 @@ const sfxImpl = {
     else noise(0.07, 'lowpass', 500 + Math.random() * 200, 250, 0.06);
   },
   swing() { noise(0.18, 'bandpass', 800, 2600, 0.22, 0, 1.5); },
+  caw(v = 0.1) { for (const [d, f] of [[0, 520], [0.24, 450]]) { tone(f, 0.17, 'sawtooth', v, f * 0.62, d); noise(0.16, 'bandpass', 1300, 700, v * 0.9, d, 3); } },
   hop(v = 0.06) { tone(150, 0.07, 'sine', v, 80); noise(0.04, 'lowpass', 500, null, v * 0.6); },
   hit() { noise(0.1, 'lowpass', 1600, null, 0.28); tone(150, 0.12, 'square', 0.16, 60); },
   skelDie() { for (let i = 0; i < 6; i++) noise(0.04, 'highpass', 1800 + Math.random() * 1500, null, 0.18, i * 0.045); tone(90, 0.3, 'sine', 0.2, 45, 0.05); },
@@ -54727,7 +54816,7 @@ function updateAudio(dt) {
   }
 }
 
-window.__spookie = { bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+window.__spookie = { crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -54829,6 +54918,7 @@ function tick() {
   updateHouse(dt, t);
   updateCombat(dt, t);
   updateBunnies(dt, t);
+  updateCrows(dt, t);
   updateSpell(dt, t);
   updateAudio(dt);
 
