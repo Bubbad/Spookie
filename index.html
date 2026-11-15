@@ -77,6 +77,17 @@
   }
   #sound.muted { color: #6b5a80; border-color: rgba(107,90,128,.6); }
   #sound.muted::after { content: ""; position: absolute; left: 20%; right: 20%; top: 50%; height: 2px; background: #ff5a6a; transform: rotate(-40deg); }
+  #inv { position: fixed; top: calc(max(14px, env(safe-area-inset-top)) + 76px); right: max(14px, env(safe-area-inset-right)); display: none; pointer-events: none; font-size: 12px; text-align: right; color: #d8d0f0; }
+  #inv .it { margin-top: 3px; padding: 3px 8px; background: rgba(10,7,20,.6); border-right: 3px solid #888; }
+  #inv b { color: #ffd9a8; } #inv .logs { border-color: #b07a3a; } #inv .planks { border-color: #e0c080; } #inv .iron { border-color: #c8663a; } #inv .nails { border-color: #aab2c5; }
+  #craft { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(340px, calc(100vw - 32px)); box-sizing: border-box; display: none; padding: 14px; background: rgba(10,7,20,.96); border: 2px solid #ff9a3c; color: #e6e0f7; box-shadow: 0 0 22px rgba(255,106,0,.35); }
+  #craft.on { display: block; }
+  #ctitle { color: #ff9a3c; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
+  #craft .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid rgba(255,154,60,.25); }
+  #craft small { display: block; color: #8f86b8; font-size: 11px; margin-top: 2px; }
+  #craft button { font: inherit; font-size: 13px; letter-spacing: 1px; padding: 8px 16px; color: #ffd9a8; background: rgba(255,154,60,.14); border: 1px solid #ff9a3c; cursor: pointer; }
+  #craft button:disabled { opacity: .35; cursor: default; }
+  #cclose { width: 100%; margin-top: 8px; }
   #hurt { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 90px 24px rgba(255,20,40,.65); opacity: 0; transition: opacity .2s; }
   #hurt.on { opacity: 1; }
   #stick {
@@ -96,9 +107,11 @@
 <div id="fade"></div>
 <div id="hurt"></div>
 <div id="hearts"></div>
+<div id="inv"></div>
 <button id="sound">&#9835;</button>
 <button id="attack">ATTACK</button>
 <button id="spell">NOVA</button>
+<div id="craft"><div id="ctitle"></div><div id="clist"></div><button id="cclose">Close</button></div>
 <div id="quest"></div>
 <div id="arrow"></div>
 <div id="toast"></div>

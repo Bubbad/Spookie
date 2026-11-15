@@ -72,6 +72,17 @@
   }
   #sound.muted { color: #6b5a80; border-color: rgba(107,90,128,.6); }
   #sound.muted::after { content: ""; position: absolute; left: 20%; right: 20%; top: 50%; height: 2px; background: #ff5a6a; transform: rotate(-40deg); }
+  #inv { position: fixed; top: calc(max(14px, env(safe-area-inset-top)) + 76px); right: max(14px, env(safe-area-inset-right)); display: none; pointer-events: none; font-size: 12px; text-align: right; color: #d8d0f0; }
+  #inv .it { margin-top: 3px; padding: 3px 8px; background: rgba(10,7,20,.6); border-right: 3px solid #888; }
+  #inv b { color: #ffd9a8; } #inv .logs { border-color: #b07a3a; } #inv .planks { border-color: #e0c080; } #inv .iron { border-color: #c8663a; } #inv .nails { border-color: #aab2c5; }
+  #craft { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(340px, calc(100vw - 32px)); box-sizing: border-box; display: none; padding: 14px; background: rgba(10,7,20,.96); border: 2px solid #ff9a3c; color: #e6e0f7; box-shadow: 0 0 22px rgba(255,106,0,.35); }
+  #craft.on { display: block; }
+  #ctitle { color: #ff9a3c; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
+  #craft .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid rgba(255,154,60,.25); }
+  #craft small { display: block; color: #8f86b8; font-size: 11px; margin-top: 2px; }
+  #craft button { font: inherit; font-size: 13px; letter-spacing: 1px; padding: 8px 16px; color: #ffd9a8; background: rgba(255,154,60,.14); border: 1px solid #ff9a3c; cursor: pointer; }
+  #craft button:disabled { opacity: .35; cursor: default; }
+  #cclose { width: 100%; margin-top: 8px; }
   #hurt { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 90px 24px rgba(255,20,40,.65); opacity: 0; transition: opacity .2s; }
   #hurt.on { opacity: 1; }
   #stick {
@@ -92,9 +103,11 @@
 <div id="fade"></div>
 <div id="hurt"></div>
 <div id="hearts"></div>
+<div id="inv"></div>
 <button id="sound">&#9835;</button>
 <button id="attack">ATTACK</button>
 <button id="spell">NOVA</button>
+<div id="craft"><div id="ctitle"></div><div id="clist"></div><button id="cclose">Close</button></div>
 <div id="quest"></div>
 <div id="arrow"></div>
 <div id="toast"></div>
@@ -53160,6 +53173,7 @@ const WALK_R = 47;        // how far the player can walk
 const FARM = { x: 27, z: 23 };                      // the farm (far south-east)
 const PEN = { x: FARM.x - 7, z: FARM.z - 2, hw: 3.5, hd: 2.5 };       // chicken pen: centre + half sizes
 const FIELD = { x: FARM.x + 1.5, z: FARM.z + 4.5, hw: 4.5, hd: 3 };   // wheat field
+const SAWMILL = { x: 2, z: 34 };                    // the sawmill (south)
 const MILL = { x: FARM.x + 8, z: FARM.z - 4 };                        // windmill
 const HOLLOW = { x: 14, z: -14, r: 9 }; // the Blighted Hollow (hostile area)
 const GROVE = { x: -32, z: -8, r: 10 };               // the Crystal Grove (far west)
@@ -53207,7 +53221,7 @@ const HOUSE = { x: -11, z: 10, hw: 3, hd: 2.5 }; // blacksmith house (door faces
 // gentle rolling hills
 function heightAt(x, z) {
   const h = Math.sin(x * 0.21) * Math.cos(z * 0.17) * 0.8 + Math.sin(x * 0.07 + z * 0.09) * 0.9;
-  const base = h * smooth(2, 8, Math.hypot(x, z)) * smooth(5, 9, Math.hypot(x - HOUSE.x, z - HOUSE.z)) * smooth(10, 14, Math.hypot(x - FARM.x, z - FARM.z)); // keep spawn, house and farm flat
+  const base = h * smooth(2, 8, Math.hypot(x, z)) * smooth(5, 9, Math.hypot(x - HOUSE.x, z - HOUSE.z)) * smooth(10, 14, Math.hypot(x - FARM.x, z - FARM.z)) * smooth(7, 11, Math.hypot(x - SAWMILL.x, z - SAWMILL.z)); // keep spawn, house, farm and sawmill flat
   const n = streamNearest(x, z);
   if (!n) return base;
   return base * smooth(5.5, 11, n.d) - 0.9 * (1 - smooth(1.0, 3.6, n.d)); // hills flatten toward the stream, then the channel dips below the waterline
@@ -53269,7 +53283,7 @@ function buildTerrain() {
   flat.computeVertexNormals();
   const pos = flat.attributes.position;
   const colors = new Float32Array(pos.count * 3);
-  const grassA = new THREE.Color(0x2f6b3a), grassB = new THREE.Color(0x3f7f3c), dirt = new THREE.Color(0x3a2c24), blight = new THREE.Color(0x2c1f3a), tilled = new THREE.Color(0x2e2018), straw = new THREE.Color(0x4a3d22), crystalGround = new THREE.Color(0x1d2540), mud = new THREE.Color(0x2b2619), bed = new THREE.Color(0x151a24), c = new THREE.Color();
+  const grassA = new THREE.Color(0x2f6b3a), grassB = new THREE.Color(0x3f7f3c), dirt = new THREE.Color(0x3a2c24), blight = new THREE.Color(0x2c1f3a), tilled = new THREE.Color(0x2e2018), straw = new THREE.Color(0x4a3d22), crystalGround = new THREE.Color(0x1d2540), mud = new THREE.Color(0x2b2619), bed = new THREE.Color(0x151a24), sawdust = new THREE.Color(0x4a3a26), c = new THREE.Color();
   for (let i = 0; i < pos.count; i += 3) {
     const cx = (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3, cy = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3, cz = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3;
     c.copy(grassA).lerp(grassB, rnd()).multiplyScalar(0.7 + rnd() * 0.3);
@@ -53280,6 +53294,8 @@ function buildTerrain() {
     if (dg < GROVE.r + 1) c.lerp(crystalGround.clone().multiplyScalar(0.8 + 0.5 * Math.abs(Math.sin(cx * 8.3 + cz * 6.1))), smooth(GROVE.r + 1, GROVE.r - 3, dg) * 0.9);
     const ds = streamNearest(cx, cz); // muddy banks and a dark bed along the stream
     if (ds && ds.d < 4.2) c.lerp(ds.d < 2.3 ? bed : mud, ds.d < 2.3 ? 0.95 : smooth(4.2, 2.3, ds.d) * 0.9);
+    const dm = Math.hypot(cx - SAWMILL.x, cz - SAWMILL.z); // trodden, sawdust-covered ground at the sawmill
+    if (dm < 6.5) c.lerp(sawdust, smooth(6.5, 3.5, dm) * 0.85);
     const dh = Math.hypot(cx - HOLLOW.x, cz - HOLLOW.z); // corrupted ground inside the hollow
     if (dh < HOLLOW.r + 1) c.lerp(blight.clone().multiplyScalar(0.7 + 0.5 * Math.abs(Math.sin(cx * 12.9 + cz * 78.2))), smooth(HOLLOW.r + 1, HOLLOW.r - 2, dh));
     for (let k = 0; k < 3; k++) colors.set([c.r, c.g, c.b], (i + k) * 3);
@@ -53304,7 +53320,7 @@ function place(obj, x, z, r) {
   obj.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   scene.add(obj);
   if (obj.userData.isTree) treeObjs.push(obj);
-  if (r) colliders.push({ x, z, r });
+  if (r) { const cc = { x, z, r }; colliders.push(cc); obj.userData.collider = cc; }
 }
 const spot = (minR = 4, maxR = WORLD_R - 3) => {
   for (;;) {
@@ -54075,6 +54091,131 @@ function updateStream(dt, t) {
   if (n && n.d < STREAM_HW + 1.1) { stream.warned = true; toast('The water is too wide and cold to cross...'); }
 }
 
+// ---------- the sawmill (south): broken at first; Bram the sawyer asks you to get it running again ----------
+const inv = { logs: 0, planks: 0, iron: 0, nails: 0, seen: {} };
+const SAW = {
+  title: 'The Silent Sawmill', state: 'none', need: 6,   // none -> wood -> ready -> repair -> done
+  dialogue: {
+    none: [
+      'Hmph. Another wanderer. Mind the saw... not that it bites anymore.',
+      'This mill ran day and night until the night the lights went out. Then the blade froze and the carriage jammed.',
+      'I can fix her, but I need timber. Six good logs from those dead trees. Swing that sword of yours at them. A few swings drops one.',
+      'Bring the logs here and we will see if she sings again.',
+    ],
+    wood: () => [`Six logs, wanderer. You have ${Math.min(inv.logs, SAW.need)} so far.`, 'Swing your sword at the dead trees. Three good hits fells one.'],
+    ready: [
+      'Ha! Seasoned wood, even dead as it is.',
+      'Give them here... there. The carriage is mended.',
+      'Now the lever on the saw bench. Pull it, and tell me what you hear.',
+    ],
+    repair: ['The lever is on the saw bench. Give it a good pull.'],
+    done: [
+      'Hear that? She sings like she used to.',
+      'Feed logs to the saw bench and you will have planks. And if you find iron, Hob can turn it into nails at his anvil.',
+      'They say there is a stream out west that no one can cross. Planks and nails make a fine bridge...',
+    ],
+  },
+};
+const sawmill = { blade: null, carriage: null, lever: null, light: null, running: false, dustT: 0 };
+const sawyer = { group: null, marker: null };
+avoid.push({ x: SAWMILL.x, z: SAWMILL.z, r: 8 });
+{
+  const shed = new THREE.Group(), plank = mat(0xb89a68), dark = mat(0x2d2530);
+  box(7.6, 0.06, 5.6, woodMid, 0, 0.03, 0, shed);                                   // floor
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const p = box(0.35, 3.2, 0.35, woodDark, sx * 3.4, 1.6, sz * 2.4, shed); p.rotation.z = sx * 0.02; }
+  { const r = box(8.2, 0.12, 2.8, dark, 0, 3.35, -1.5, shed); r.rotation.x = -0.18; }                  // a roof over the back half only, so the camera can see the saw
+  for (const x of [-3.4, -1.7, 0, 1.7, 3.4]) box(0.14, 0.14, 2.6, woodDark, x, 3.3, 1.4, shed);          // bare rafters over the front
+  box(5, 0.9, 1.3, woodMid, 0, 0.55, 0, shed);                                      // the saw bench
+  for (const sx of [-0.55, 0.55]) box(0.1, 0.1, 5, metal, sx, 1.05, 0, shed);       // rails
+  // circular blade (appears when the mill is mended)
+  const blade = new THREE.Group(); blade.position.set(0, 1.7, 0); shed.add(blade);
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.05, 20), steel); disc.rotation.x = Math.PI / 2; blade.add(disc);
+  for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2, tooth = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.22, 3), steel); tooth.position.set(Math.cos(a) * 0.98, Math.sin(a) * 0.98, 0); tooth.rotation.z = a - Math.PI / 2; blade.add(tooth); }
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.16, 8), metal); hub.rotation.x = Math.PI / 2; blade.add(hub);
+  blade.visible = false;
+  // carriage with a log on it
+  const carriage = new THREE.Group(); carriage.position.set(0, 1.18, -1.4); shed.add(carriage);
+  box(1.2, 0.12, 2.6, woodDark, 0, 0, 0, carriage);
+  const log = cyl(0.34, 0.34, 2.4, 8, mat(0x6a4a30), 0, 0.42, 0, carriage); log.rotation.x = Math.PI / 2;
+  // lever
+  const lever = new THREE.Group(); lever.position.set(3.0, 1.0, 1.0); shed.add(lever);
+  box(0.12, 1.0, 0.12, metal, 0, 0.5, 0, lever); box(0.3, 0.12, 0.12, woodDark, 0, 1.0, 0, lever); lever.rotation.z = -0.8;
+  // log pile, plank stack, a lantern on a post, a sign
+  for (const [x, y, z] of [[-4.8, 0.35, 1.2], [-4.8, 0.35, 2.0], [-4.8, 0.35, 0.4], [-4.8, 0.95, 1.6], [-4.8, 0.95, 0.8]]) { const l = cyl(0.34, 0.34, 2.4, 8, mat(0x6a4a30), x, y, z, shed); l.rotation.z = Math.PI / 2; }
+  for (let i = 0; i < 5; i++) box(1.8, 0.1, 0.5, plank, 4.9, 0.1 + i * 0.12, -1.4 + (i % 2) * 0.05, shed);
+  cyl(0.06, 0.07, 2.4, 5, woodDark, -3.8, 1.2, 3.0, shed);
+  const lampM = new THREE.MeshBasicMaterial({ color: 0x9affc8 }); sawmill.lampM = lampM;
+  box(0.26, 0.34, 0.26, lampM, -3.8, 2.5, 3.0, shed);
+  const sl = new THREE.PointLight(0x9affc8, 6, 11, 1.5); sl.position.set(-3.8, 2.5, 3.0); sl.userData.base = 6; flickers.push(sl); shed.add(sl); sawmill.light = sl;
+  box(1.8, 0.5, 0.06, woodDark, 0, 3.0, 2.85, shed); const icon = cyl(0.17, 0.17, 0.05, 10, steel, 0, 3.0, 2.9, shed); icon.rotation.x = Math.PI / 2;
+  shed.position.set(SAWMILL.x, 0, SAWMILL.z); shed.rotation.y = 0;
+  shed.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  scene.add(shed);
+  Object.assign(sawmill, { blade, carriage, lever });
+  colliders.push({ x: SAWMILL.x, z: SAWMILL.z, hw: 2.55, hd: 0.8, r: 3 });
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) colliders.push({ x: SAWMILL.x + sx * 3.4, z: SAWMILL.z + sz * 2.4, r: 0.35 });
+  colliders.push({ x: SAWMILL.x - 4.8, z: SAWMILL.z + 1.2, r: 1.5 }, { x: SAWMILL.x + 4.9, z: SAWMILL.z - 1.4, r: 1.1 });
+
+  // Bram the sawyer
+  const g = new THREE.Group(), skin = mat(0xd2a88a), shirt = mat(0xb8a88a), dk = new THREE.MeshBasicMaterial({ color: 0x111111 });
+  const body = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.2, 7), mat(0x6a4a32)); body.position.y = 0.6; g.add(body);
+  box(0.75, 0.8, 0.42, shirt, 0, 1.15, 0, g);
+  for (const sx of [-0.2, 0.2]) box(0.08, 0.85, 0.46, mat(0x5a2a2a), sx, 1.12, 0, g);   // suspenders
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 6, 5), skin); head.position.y = 1.7; g.add(head);
+  box(0.4, 0.34, 0.2, mat(0x5a4030), 0, 1.5, 0.2, g);                                    // beard
+  cyl(0.28, 0.28, 0.1, 8, mat(0x3a4a3a), 0, 1.93, 0, g); box(0.34, 0.04, 0.2, mat(0x3a4a3a), 0, 1.88, 0.3, g); // flat cap
+  box(0.06, 0.06, 0.04, dk, -0.09, 1.72, 0.25, g); box(0.06, 0.06, 0.04, dk, 0.09, 1.72, 0.25, g);
+  box(0.18, 0.18, 0.5, shirt, -0.5, 1.1, 0.2, g);
+  box(0.18, 0.18, 0.5, shirt, 0.5, 1.1, 0.2, g);
+  box(0.12, 0.16, 0.8, woodDark, 0.5, 0.95, 0.65, g); box(0.9, 0.22, 0.03, steel, 0.5, 0.95, 1.2, g); // handsaw
+  g.position.set(SAWMILL.x - 5.2, 0, SAWMILL.z + 3.2); g.rotation.y = 0.5; g.userData.faceY = 0.5;
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  const mk = new THREE.Group(), mm = new THREE.MeshBasicMaterial({ color: 0xffd34d });
+  box(0.14, 0.38, 0.14, mm, 0, 0.2, 0, mk); box(0.14, 0.14, 0.14, mm, 0, -0.1, 0, mk); g.add(mk);
+  scene.add(g); sawyer.group = g; sawyer.marker = mk;
+  colliders.push({ x: g.position.x, z: g.position.z, r: 0.5 });
+}
+function setSawmillRunning(on) {
+  sawmill.running = on; sawmill.blade.visible = on; sawmill.lever.rotation.z = on ? 0.6 : -0.8;
+  sawmill.lampM.color.setHex(on ? 0xffb060 : 0x9affc8); sawmill.light.color.setHex(on ? 0xffb060 : 0x9affc8); sawmill.light.userData.base = on ? 9 : 5;
+}
+function updateSawmill(dt, t) {
+  sawyer.marker.visible = SAW.state === 'none' || SAW.state === 'ready';
+  sawyer.marker.position.y = 2.6 + Math.sin(t * 3) * 0.1; sawyer.marker.rotation.y = t * 2;
+  if (SAW.state === 'wood' && inv.logs >= SAW.need) { SAW.state = 'ready'; renderQuestHud(); toast('Enough logs! Bring them to Bram'); sfx.soul(); }
+  if (!sawmill.running) return;
+  sawmill.blade.rotation.z -= dt * 20;
+  sawmill.carriage.position.z = Math.sin(t * 0.5) * 1.5;
+  if (world === 'outside' && Math.hypot(SAWMILL.x - pPos.x, SAWMILL.z - pPos.y) < 28) {
+    sawmill.dustT -= dt;
+    if (sawmill.dustT <= 0 && Math.abs(sawmill.carriage.position.z) < 0.8) { sawmill.dustT = 0.12; spawnFx(SAWMILL.x, 1.9, SAWMILL.z, 0xe8d4a0, 2); } // sawdust where the blade bites
+  }
+}
+function talkToSawyer() {
+  const st = SAW.state, d = SAW.dialogue[st];
+  openDialog('Bram the Sawyer', typeof d === 'function' ? d() : d, () => {
+    if (st === 'none') { SAW.state = 'wood'; toast('Quest started: The Silent Sawmill'); }
+    else if (st === 'ready') { inv.logs -= SAW.need; renderInv(); SAW.state = 'repair'; }
+    renderQuestHud();
+  }, sawyer.group);
+}
+function pullLever() {
+  openDialog('Sawmill', ['You grip the rusted lever and pull.', 'The saw shudders... then screams to life!'], () => {
+    SAW.state = 'done'; setSawmillRunning(true); sfx.lever();
+    inv.planks += 4; inv.seen.planks = true; renderInv();
+    toast('Quest complete! +4 Planks'); renderQuestHud();
+  }, null);
+}
+function useSawBench() {
+  if (SAW.state === 'done') openCrafting('mill');
+  else openDialog('Saw Bench', ['The great saw is rusted solid and the carriage is jammed.', SAW.state === 'none' ? 'The sawyer standing nearby might know how to fix it.' : 'Bram is working on it.'], null, null);
+}
+interactables.push(
+  { world: 'outside', getPos: () => sawyer.group.position, r: 3.2, label: 'TALK', act: talkToSawyer },
+  { world: 'outside', getPos: () => ({ x: SAWMILL.x + 3.0, z: SAWMILL.z + 1.0 }), r: 1.8, label: 'PULL LEVER', act: pullLever, enabled: () => SAW.state === 'repair' },
+  { world: 'outside', getPos: () => ({ x: SAWMILL.x, z: SAWMILL.z + 1.5 }), r: 1.9, label: 'SAW BENCH', act: useSawBench },
+);
+
 // graveyard patch near the middle-ish, trees around, pumpkins scattered
 for (let i = 0; i < 16; i++) { // tombstones in a cluster
   const a = rnd() * 6.28, d = Math.sqrt(rr(16, 90));
@@ -54095,7 +54236,7 @@ for (let i = 0; i < 20; i++) { const [x, z] = spot(4, WALK_R - 1); place(pumpkin
     const a = rnd() * 6.28, d = Math.sqrt(rnd()) * (WORLD_R - 2), x = Math.cos(a) * d, z = Math.sin(a) * d;
     pos.set(x, heightAt(x, z), z);
     q.setFromEuler(new THREE.Euler(rr(-0.2, 0.2), rnd() * 6.28, rr(-0.2, 0.2)));
-    const inFarm = (Math.abs(x - FIELD.x) < FIELD.hw + 0.5 && Math.abs(z - FIELD.z) < FIELD.hd + 0.5) || (Math.abs(x - PEN.x) < PEN.hw + 0.5 && Math.abs(z - PEN.z) < PEN.hd + 0.5) || Math.hypot(x - GROVE.x, z - GROVE.z) < GROVE.r - 1;
+    const inFarm = (Math.abs(x - FIELD.x) < FIELD.hw + 0.5 && Math.abs(z - FIELD.z) < FIELD.hd + 0.5) || (Math.abs(x - PEN.x) < PEN.hw + 0.5 && Math.abs(z - PEN.z) < PEN.hd + 0.5) || Math.hypot(x - GROVE.x, z - GROVE.z) < GROVE.r - 1 || Math.hypot(x - SAWMILL.x, z - SAWMILL.z) < 6;
     s.setScalar(inFarm ? 0.0001 : rr(0.7, 1.6)); // no grass tufts poking through the field or pen
     inst.setMatrixAt(i, m.compose(pos, q, s));
     inst.setColorAt(i, col.setHSL(rr(0.25, 0.36), 0.45, rr(0.2, 0.34)));
@@ -54159,6 +54300,7 @@ camera.lookAt(0, 0, 0);
 const keys = new Set();
 addEventListener('keydown', e => {
   keys.add(e.code); hideHint();
+  if (e.code === 'Escape' && crafting) closeCrafting();
   if (['KeyF', 'KeyJ'].includes(e.code) && !e.repeat) attack();
   if (['KeyQ', 'KeyK'].includes(e.code) && !e.repeat) castSpell();
   if (e.code === 'KeyM' && !e.repeat) { initAudio(); setMuted(!audio.muted); }
@@ -54200,7 +54342,7 @@ let hintHidden = false;
 function hideHint() { if (hintHidden) return; hintHidden = true; document.getElementById('hint').style.opacity = 0; }
 
 function readInput() {
-  if (talking || transitioning) return [0, 0];
+  if (talking || transitioning || crafting) return [0, 0];
   let x = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
   let y = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0);
   if (!x && !y) { x = joy.x; y = joy.y; }
@@ -54213,7 +54355,7 @@ function readInput() {
 // ---------- quests & dialogue ----------
 const $ = id => document.getElementById(id);
 const ui = { quest: $('quest'), arrow: $('arrow'), talk: $('talk'), dialog: $('dialog'), dname: $('dname'), dtext: $('dtext'), dnext: $('dnext'), toast: $('toast') };
-let talking = false;
+let talking = false, crafting = false;
 
 // Quest data: add more entries here later. state: none -> active -> ready -> done
 const QUEST = {
@@ -54344,6 +54486,8 @@ function renderQuestHud() {
     : QUEST.state === 'ready' ? 'Return to Old Marrow by the fire' : 'Complete'));
   if (SQ.state !== 'none') parts.push(`<b>${SQ.title}</b><br>` + (SQ.state === 'active' ? `Find iron ore <span>${SQ.found}/${SQ.need}</span>`
     : SQ.state === 'ready' ? 'Return to Hob in the smithy' : 'Complete'));
+  if (SAW.state !== 'none') parts.push(`<b>${SAW.title}</b><br>` + (SAW.state === 'wood' ? `Chop logs from dead trees <span>${Math.min(inv.logs, SAW.need)}/${SAW.need}</span>`
+    : SAW.state === 'ready' ? 'Bring the logs to Bram' : SAW.state === 'repair' ? 'Pull the lever on the saw bench' : 'Complete'));
   if (NIGHT.state !== 'none') parts.push(`<b>${NIGHT.title}</b><br>` + (NIGHT.state === 'relight' ? 'Relight the scarecrow in the field'
     : NIGHT.state === 'vigil' ? `Defend the field <span>wave ${Math.max(1, NIGHT.wave)}/${NIGHT.waves.length}</span> &middot; wheat <span>${Math.round(NIGHT.wheat * 100)}%</span>`
     : NIGHT.state === 'ready' ? 'Return to Farmer Oda' : 'Complete'));
@@ -54395,7 +54539,8 @@ function talkToSmith() {
   }, smith.group);
 }
 function useAnvil() {
-  openDialog('Anvil', ['A heavy iron anvil, scarred by a thousand hammer blows.', 'It is still warm. Forging will be available soon.'], null, null);
+  if (SQ.state === 'done') openCrafting('anvil');
+  else openDialog('Anvil', ['A heavy iron anvil, scarred by a thousand hammer blows.', 'It is Hob\'s. He will let you use it once you have helped him.'], null, null);
 }
 function advance() {
   const line = lines[lineIdx];
@@ -54416,6 +54561,7 @@ function currentInteractable() {
   return best;
 }
 function interact() {
+  if (crafting) { closeCrafting(); return; }
   if (talking) advance();
   else if (!transitioning) { const o = currentInteractable(); if (o) o.act(); }
 }
@@ -54444,13 +54590,13 @@ function updateQuests(dt, t) {
     ui.dtext.textContent = line.slice(0, Math.floor(shown));
     ui.dnext.style.visibility = shown >= line.length ? 'visible' : 'hidden';
   }
-  for (const n of [npc, smith.group, farmer.group]) {
+  for (const n of [npc, smith.group, farmer.group, sawyer.group]) {
     let want = n.userData.faceY;
     if (talking && n === talkNpc) want = Math.atan2(pPos.x - n.position.x, pPos.y - n.position.z);
     const d = Math.atan2(Math.sin(want - n.rotation.y), Math.cos(want - n.rotation.y));
     n.rotation.y += d * Math.min(1, dt * (talking && n === talkNpc ? 6 : 4));
   }
-  const it = !talking && !transitioning ? currentInteractable() : null;
+  const it = !talking && !transitioning && !crafting ? currentInteractable() : null;
   ui.talk.classList.toggle('on', !!it);
   if (it) ui.talk.textContent = it.label;
 
@@ -54501,6 +54647,8 @@ function updateQuests(dt, t) {
   if (SQ.state === 'ready') cands.push([HOUSE.x, HOUSE.z + HOUSE.hd]);
   if (NIGHT.state === 'relight') cands.push([FIELD.x, FIELD.z]);
   if (NIGHT.state === 'ready') cands.push([FARMER_POS.x, FARMER_POS.z]);
+  if (SAW.state === 'ready') cands.push([sawyer.group.position.x, sawyer.group.position.z]);
+  if (SAW.state === 'repair') cands.push([SAWMILL.x + 3.0, SAWMILL.z + 1.0]);
   let target = null, bestD = 1e9;
   for (const c of cands) { const d = Math.hypot(c[0] - pPos.x, c[1] - pPos.y); if (d < bestD) { bestD = d; target = c; } }
   if (target && !talking && world === 'outside') {
@@ -54607,9 +54755,10 @@ function applyHits() {
     const dx = e.x - pPos.x, dz = e.z - pPos.y, d = Math.hypot(dx, dz);
     if (d < 2.3 && (dx * fx_ + dz * fz_) / (d || 1) > 0.2) damageEnemy(e, 1, dx, dz);
   }
+  hitNodes(fx_, fz_);
 }
 function attack() {
-  if (talking || transitioning || world !== 'outside' || combat.cd > 0 || combat.dead) return;
+  if (talking || transitioning || crafting || world !== 'outside' || combat.cd > 0 || combat.dead) return;
   combat.cd = 0.5; combat.atkT = 0.0001; combat.hit = false; sfx.swing();
   let best = null, bd = 3.2; // soft aim at the nearest enemy
   for (const e of enemies) { if (e.state === 'dead') continue; const d = Math.hypot(e.x - pPos.x, e.z - pPos.y); if (d < bd) { bd = d; best = e; } }
@@ -54656,7 +54805,7 @@ function stepTo(e, tx, tz, sp, dt) {
 
 function updateCombat(dt, t) {
   const out = world === 'outside';
-  atkBtn.classList.toggle('on', out && !talking && !transitioning);
+  atkBtn.classList.toggle('on', out && !talking && !transitioning && !crafting);
   combat.cd = Math.max(0, combat.cd - dt); combat.inv = Math.max(0, combat.inv - dt);
   // sword swing
   if (combat.atkT > 0) {
@@ -54690,7 +54839,7 @@ function updateCombat(dt, t) {
       scene.remove(k.g); pickups.splice(i, 1);
     }
   }
-  if (talking || transitioning) return;
+  if (talking || transitioning || crafting) return;
 
   // skeleton AI
   const playerHere = inHollow(pPos.x, pPos.y, 3);
@@ -54783,7 +54932,7 @@ const novaSparks = [];
   for (let i = 0; i < 44; i++) { const m = new THREE.Mesh(g, novaMats.spark); m.userData = { a: (i / 44) * Math.PI * 2 + rnd() * 0.1, j: rr(0.9, 1.05), lift: rr(0.2, 1.4), ph: rnd() * 6 }; nova.add(m); novaSparks.push(m); }
 }
 function castSpell() {
-  if (talking || transitioning || world !== 'outside' || combat.dead || spell.cd > 0 || spell.t >= 0) return;
+  if (talking || transitioning || crafting || world !== 'outside' || combat.dead || spell.cd > 0 || spell.t >= 0) return;
   spell.cd = spell.cdMax; spell.t = 0; spell.x = pPos.x; spell.z = pPos.y; spell.hit.clear();
   nova.position.set(spell.x, heightAt(spell.x, spell.z) + 0.25, spell.z); nova.visible = true;
   novaLight.position.set(spell.x, heightAt(spell.x, spell.z) + 1.8, spell.z);
@@ -54793,7 +54942,7 @@ spellBtn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropag
 
 function updateSpell(dt, t) {
   const out = world === 'outside';
-  spellBtn.classList.toggle('on', out && !talking && !transitioning);
+  spellBtn.classList.toggle('on', out && !talking && !transitioning && !crafting);
   spell.cd = Math.max(0, spell.cd - dt);
   spellBtn.style.setProperty('--cd', (spell.cd / spell.cdMax).toFixed(3));
   spellBtn.classList.toggle('ready', spell.cd <= 0);
@@ -54914,7 +55063,7 @@ function vigilWin() {
   toast('The field is saved! Return to the farmer'); sfx.soul();
 }
 function updateVigil(dt) {
-  if (NIGHT.state !== 'vigil' || talking || transitioning) return;
+  if (NIGHT.state !== 'vigil' || talking || transitioning || crafting) return;
   if (NIGHT.nextT > 0) { NIGHT.nextT -= dt; if (NIGHT.nextT <= 0) spawnWave(); }
   else {
     let alive = 0, tramplers = 0;
@@ -54947,6 +55096,109 @@ interactables.push(
   { world: 'outside', getPos: () => farm.scare.position, r: 2.6, label: 'RELIGHT', act: relightScarecrow, enabled: () => NIGHT.state === 'relight' },
 );
 renderQuestHud();
+
+// ---------- gathering and crafting: chop dead trees for logs, mine iron veins, a tiny crafting window ----------
+const NAMES = { logs: ['Log', 'Logs'], planks: ['Plank', 'Planks'], iron: ['Iron', 'Iron'], nails: ['Nail', 'Nails'] };
+const resources = { hinted: false };
+const invEl = $('inv');
+function renderInv() {
+  const html = Object.keys(NAMES).filter(k => inv[k] > 0 || inv.seen[k]).map(k => `<div class="it ${k}">${NAMES[k][1]} <b>${inv[k]}</b></div>`).join('');
+  invEl.innerHTML = html; invEl.style.display = html ? 'block' : 'none';
+}
+function addItem(k, n) { inv[k] += n; inv.seen[k] = true; renderInv(); renderQuestHud(); if (crafting) renderCraft(); }
+renderInv();
+
+// resource nodes: every dead tree, plus a handful of iron veins out in the woods
+const nodes = [];
+function makeNode(obj, kind, hp) {
+  const n = { obj, kind, hp, maxHp: hp, x: obj.position.x, z: obj.position.z, state: 'ok', t: 0, rt: 0, shake: 0, dirx: 0, dirz: 1, q0: obj.quaternion.clone(), s0: obj.scale.x, cr: obj.userData.collider ? obj.userData.collider.r : 0 };
+  nodes.push(n); return n;
+}
+treeObjs.forEach(t => makeNode(t, 'tree', 3));
+function makeVein() {
+  const g = new THREE.Group(), rockM = mat(0x4a4650), glintM = new THREE.MeshBasicMaterial({ color: 0xff8a3c });
+  for (let i = 0; i < 3; i++) {
+    const r = new THREE.Mesh(new THREE.DodecahedronGeometry(rr(0.4, 0.6), 0), rockM);
+    r.position.set(rr(-0.5, 0.5), 0.3, rr(-0.5, 0.5)); r.scale.y = 0.8; r.rotation.set(rnd() * 3, rnd() * 3, 0); g.add(r);
+    box(0.1, 0.1, 0.1, glintM, r.position.x + 0.2, 0.5, r.position.z + 0.15, g);
+  }
+  return g;
+}
+for (let i = 0; i < 7; i++) { const [x, z] = spot(10, WALK_R - 3), v = makeVein(); place(v, x, z, 0.9); makeNode(v, 'iron', 3); }
+
+function scareCrowsOff(tree) { // a crow cannot stay on a tree that is being felled
+  for (const c of crows) {
+    if (c.tree !== tree) continue;
+    if (c.state === 'perch') { const a = rnd() * 6.28; c.state = 'flee'; c.t = 0; c.vx = Math.cos(a) * 6.5; c.vz = Math.sin(a) * 6.5; c.tree = null; c.face = Math.atan2(c.vx, c.vz); spawnFx(c.x, c.y + 0.2, c.z, 0x2a2040, 6); }
+    else if (c.state === 'land') { c.state = 'gone'; c.gone = 3; c.g.visible = false; c.tree = null; }
+  }
+}
+function breakNode(n) {
+  if (n.obj.userData.collider) n.obj.userData.collider.r = -5; // nothing blocks the spot any more
+  if (n.kind === 'tree') { n.state = 'falling'; n.t = 0; scareCrowsOff(n.obj); addItem('logs', 2); toast('+2 Logs'); sfx.fell(); }
+  else { n.state = 'gone'; n.rt = 120; n.obj.visible = false; addItem('iron', 1); toast('+1 Iron'); sfx.ore(); }
+}
+function hitNodes(fx_, fz_) { // called from the sword swing
+  for (const n of nodes) {
+    if (n.state !== 'ok') continue;
+    const dx = n.x - pPos.x, dz = n.z - pPos.y, d = Math.hypot(dx, dz);
+    if (d > 2.5 || (dx * fx_ + dz * fz_) / (d || 1) < 0.15) continue;
+    if (n.kind === 'iron' && SQ.state !== 'done') { if (!resources.hinted) { resources.hinted = true; toast('Rust-veined rock... Hob might know what to do with iron.'); } continue; }
+    n.hp--; n.shake = 0.3; n.dirx = dx / (d || 1); n.dirz = dz / (d || 1);
+    sfx.chop(); spawnFx(n.x - n.dirx * 0.5, 1.0, n.z - n.dirz * 0.5, n.kind === 'tree' ? 0x8a6a44 : 0xb5532a, 4);
+    if (n.hp <= 0) breakNode(n);
+  }
+}
+const _axis = new THREE.Vector3();
+function updateNodes(dt) {
+  for (const n of nodes) {
+    const o = n.obj;
+    if (n.state === 'ok') {
+      if (n.shake > 0) {
+        n.shake -= dt;
+        if (n.kind === 'tree') { o.quaternion.copy(n.q0); o.rotateOnWorldAxis(_axis.set(n.dirz, 0, -n.dirx), Math.sin(n.shake * 50) * 0.05 * Math.max(0, n.shake / 0.3)); }
+        else o.scale.setScalar(n.s0 * (1 + Math.sin(n.shake * 50) * 0.06));
+        if (n.shake <= 0) { o.quaternion.copy(n.q0); o.scale.setScalar(n.kind === 'iron' ? n.s0 * (0.4 + 0.6 * n.hp / n.maxHp) : n.s0); } // veins shrink with every hit
+      }
+    } else if (n.state === 'falling') {
+      n.t += dt; const p = Math.min(1, n.t / 0.8);
+      o.quaternion.copy(n.q0); o.rotateOnWorldAxis(_axis.set(n.dirz, 0, -n.dirx), p * p * 1.5);
+      if (p >= 1) { o.visible = false; n.state = 'gone'; n.rt = 90; }
+    } else if (n.state === 'gone') {
+      n.rt -= dt;
+      if (n.rt <= 0 && Math.hypot(n.x - pPos.x, n.z - pPos.y) > 10) { o.visible = true; o.quaternion.copy(n.q0); n.hp = n.maxHp; n.state = 'grow'; n.t = 0; o.scale.setScalar(n.s0 * 0.15); }
+    } else if (n.state === 'grow') {
+      n.t += dt; const s = Math.min(1, n.t / 1.2); o.scale.setScalar(n.s0 * (0.15 + 0.85 * s));
+      if (s >= 1) { n.state = 'ok'; if (o.userData.collider) o.userData.collider.r = n.cr; }
+    }
+  }
+}
+
+// crafting window: very simple, opens at the saw bench and the anvil once their quests are done
+const craftEl = $('craft'), ctitle = $('ctitle'), clist = $('clist');
+const RECIPES = {
+  mill: { title: 'Sawmill', rows: [{ gain: { planks: 2 }, cost: { logs: 1 } }] },
+  anvil: { title: 'Anvil', rows: [{ gain: { nails: 4 }, cost: { iron: 1 } }] },
+};
+const fmt = o => Object.entries(o).map(([k, v]) => `${v} ${NAMES[k][v === 1 ? 0 : 1]}`).join(' + ');
+let craftKind = null;
+function renderCraft() {
+  clist.innerHTML = RECIPES[craftKind].rows.map((r, i) => {
+    const ok = Object.entries(r.cost).every(([k, v]) => inv[k] >= v);
+    return `<div class="row"><div><b>${fmt(r.gain)}</b><small>costs ${fmt(r.cost)}</small></div><button data-i="${i}" ${ok ? '' : 'disabled'}>Craft</button></div>`;
+  }).join('');
+}
+function openCrafting(kind) { craftKind = kind; crafting = true; ctitle.textContent = RECIPES[kind].title; renderCraft(); craftEl.classList.add('on'); }
+function closeCrafting() { crafting = false; craftEl.classList.remove('on'); }
+clist.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || b.disabled) return;
+  const r = RECIPES[craftKind].rows[+b.dataset.i];
+  for (const [k, v] of Object.entries(r.cost)) inv[k] -= v;
+  for (const [k, v] of Object.entries(r.gain)) { inv[k] += v; inv.seen[k] = true; }
+  sfx.craft(); renderInv(); renderQuestHud(); renderCraft();
+});
+$('cclose').addEventListener('click', closeCrafting);
+['pointerdown', 'pointerup'].forEach(ev => craftEl.addEventListener(ev, e => e.stopPropagation()));
 
 // ---------- bunnies: nibble grass, hop around, scatter when you get close ----------
 const bunnies = [];
@@ -55048,7 +55300,7 @@ function crowPose(c, a) { c.wings[0].rotation.z = -a; c.wings[1].rotation.z = a;
 function crowTreeTop(tr) { return { x: tr.position.x, y: tr.position.y + tr.userData.topY + 0.1, z: tr.position.z }; }
 function freeTree(minPlayerDist) {
   const taken = new Set(crows.map(c => c.tree));
-  const pool = treeObjs.filter(t => !taken.has(t) && Math.hypot(t.position.x - pPos.x, t.position.z - pPos.y) > minPlayerDist && Math.hypot(t.position.x, t.position.z) > 6);
+  const pool = treeObjs.filter(t => t.visible && !taken.has(t) && Math.hypot(t.position.x - pPos.x, t.position.z - pPos.y) > minPlayerDist && Math.hypot(t.position.x, t.position.z) > 6);
   return pool.length ? pool[Math.floor(rnd() * pool.length)] : null;
 }
 function perchCrow(c, tr) {
@@ -55216,6 +55468,13 @@ function initAudio() {
   const sg2 = ctx.createGain(); sg2.gain.value = 0.35;
   lfoTo(0.6, 350, sb1.frequency); lfoTo(1.1, 700, sb2.frequency); lfoTo(0.35, 0.2, sg2.gain);
   sns.connect(sb1); sb1.connect(L.stream); sns.connect(sb2); sb2.connect(sg2); sg2.connect(L.stream); sns.start(0, 0.9);
+  // sawmill: a whining blade with a cutting rhythm (only audible once the mill is running)
+  L.saw = mk();
+  const swf = ctx.createBiquadFilter(); swf.type = 'lowpass'; swf.frequency.value = 1100; swf.connect(L.saw);
+  const swt = ctx.createGain(); swt.gain.value = 0.55; swt.connect(swf); lfoTo(7, 0.35, swt.gain);
+  for (const f of [150, 153]) { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; const g = ctx.createGain(); g.gain.value = 0.4; o.connect(g); g.connect(swt); o.start(); }
+  const swn = ctx.createBufferSource(); swn.buffer = nb; swn.loop = true; const swb = ctx.createBiquadFilter(); swb.type = 'bandpass'; swb.frequency.value = 2600; swb.Q.value = 3;
+  const swg = ctx.createGain(); swg.gain.value = 0.2; swn.connect(swb); swb.connect(swg); swg.connect(L.saw); swn.start(0, 1.3);
   // music-box bells bus
   L.bell = mk(); L.bell.connect(rev);
   audio.mood = ''; audio.t.chord = 0;
@@ -55257,6 +55516,10 @@ const sfxImpl = {
   cluck(v = 0.08) { tone(720, 0.05, 'square', v, 520); tone(640, 0.07, 'square', v * 0.9, 420, 0.07); noise(0.05, 'bandpass', 1500, 900, v * 0.5, 0, 2); },
   creak(v = 0.08) { tone(70, 0.7, 'sawtooth', v, 120); tone(105, 0.6, 'sawtooth', v * 0.6, 170, 0.1); noise(0.6, 'bandpass', 260, 520, v * 0.9, 0, 5); },
   glint() { [1318.5, 1760, 2093].forEach((f, i) => bell(f, 0.12, i * 0.08, audio.jb)); },
+  chop() { noise(0.08, 'lowpass', 1400, null, 0.25); tone(220, 0.08, 'square', 0.1, 110); },
+  fell() { tone(90, 0.5, 'sine', 0.25, 40); noise(0.5, 'bandpass', 500, 150, 0.2); },
+  lever() { tone(120, 0.12, 'square', 0.2, 70); tone(80, 0.2, 'sawtooth', 0.15, 50, 0.1); },
+  craft() { tone(880, 0.08, 'triangle', 0.2); tone(1318.5, 0.15, 'triangle', 0.18, null, 0.08); noise(0.04, 'highpass', 4000, null, 0.1); },
   hop(v = 0.06) { tone(150, 0.07, 'sine', v, 80); noise(0.04, 'lowpass', 500, null, v * 0.6); },
   hit() { noise(0.1, 'lowpass', 1600, null, 0.28); tone(150, 0.12, 'square', 0.16, 60); },
   skelDie() { for (let i = 0; i < 6; i++) noise(0.04, 'highpass', 1800 + Math.random() * 1500, null, 0.18, i * 0.045); tone(90, 0.3, 'sine', 0.2, 45, 0.05); },
@@ -55323,6 +55586,8 @@ function updateAudio(dt) {
   set(L.ghost, out ? Math.max(0, 1 - gd / 9) * 0.12 : 0, 0.3);
   const snr = out ? streamNearest(pPos.x, pPos.y) : null, sdist = snr ? snr.d - 2.5 : 99;
   set(L.stream, Math.pow(Math.max(0, 1 - sdist / 14), 1.5) * 0.13, 0.3);
+  const dsw = out ? Math.hypot(SAWMILL.x - pPos.x, SAWMILL.z - pPos.y) : 99;
+  set(L.saw, SAW.state === 'done' ? Math.pow(Math.max(0, 1 - dsw / 24), 1.5) * 0.1 : 0, 0.3);
   const dgr = out ? Math.hypot(GROVE.x - pPos.x, GROVE.z - pPos.y) : 99;
   set(L.crystal, Math.pow(Math.max(0, 1 - dgr / 22), 1.5) * 0.08, 0.4);
   if (dgr < 16) { // glassy chimes that get louder the closer you are
@@ -55396,7 +55661,7 @@ function updateLightPool(dt) {
 }
 initLightPool();
 
-window.__spookie = { streamNearest, streamPush, isCutOff, STREAM_HW, STREAM_PTS, renderer, camera, scene, lightPool, lightSrc, GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+window.__spookie = { setSawmillRunning, inv, SAW, nodes, addItem, openCrafting, closeCrafting, setFacing: a => { facing = a; }, SAWMILL, sawyer, sawmill, streamNearest, streamPush, isCutOff, STREAM_HW, STREAM_PTS, renderer, camera, scene, lightPool, lightSrc, GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -55504,6 +55769,8 @@ function tick() {
   updateVigil(dt);
   updateGrove(dt, t);
   updateStream(dt, t);
+  updateSawmill(dt, t);
+  updateNodes(dt);
   updateLightPool(dt);
   updateSpell(dt, t);
   updateAudio(dt);
