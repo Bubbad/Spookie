@@ -1282,6 +1282,80 @@ function updateSpell(dt, t) {
   if (p >= 1) { spell.t = -1; nova.visible = false; novaLight.intensity = 0; }
 }
 
+// ---------- bunnies: nibble grass, hop around, scatter when you get close ----------
+const bunnies = [];
+const BUNNY_SCARE_R = 4.2;
+function makeBunny(col) {
+  const g = new THREE.Group(), fur = mat(col, { emissive: col, emissiveIntensity: 0.28 }), white = mat(0xf4efe6, { emissive: 0xf4efe6, emissiveIntensity: 0.35 }), dark = new THREE.MeshBasicMaterial({ color: 0x111111 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.28, 7, 5), fur); body.scale.set(1, 0.85, 1.3); body.position.y = 0.3; g.add(body);
+  const head = new THREE.Group(); head.position.set(0, 0.45, 0.32); g.add(head);
+  head.add(new THREE.Mesh(new THREE.SphereGeometry(0.17, 6, 5), fur));
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.035, 4, 3), mat(0xe8a0a0)); nose.position.set(0, -0.02, 0.17); head.add(nose);
+  box(0.03, 0.03, 0.02, dark, -0.08, 0.04, 0.14, head); box(0.03, 0.03, 0.02, dark, 0.08, 0.04, 0.14, head);
+  const ears = [];
+  for (const sx of [-1, 1]) {
+    const ear = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.3, 0.03), fur);
+    ear.position.set(sx * 0.07, 0.26, -0.02); ear.rotation.z = -sx * 0.15; head.add(ear); ears.push(ear);
+  }
+  const tail = new THREE.Mesh(new THREE.SphereGeometry(0.09, 5, 4), white); tail.position.set(0, 0.36, -0.36); g.add(tail);
+  for (const sx of [-1, 1]) { box(0.1, 0.13, 0.24, fur, sx * 0.17, 0.1, -0.08, g); box(0.06, 0.15, 0.06, fur, sx * 0.1, 0.075, 0.22, g); }
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return { g, head, ears };
+}
+{
+  const furs = [0xa07c55, 0xc4b09c, 0x8a7058, 0xf0ebe0, 0xb08a60];
+  for (let i = 0; i < 9; i++) {
+    let x, z, tries = 0;
+    do { [x, z] = spot(5, WALK_R - 3); tries++; } while (tries < 60 && (inHollow(x, z, 3) || Math.hypot(x - HOUSE.x, z - HOUSE.z) < 6));
+    const b = makeBunny(furs[i % furs.length]);
+    Object.assign(b, { x, z, face: rnd() * 6.28, state: 'eat', t: 0, dur: rr(1, 4), hop: null, hopsLeft: 0, ph: rnd() * 6, y: 0 });
+    b.g.position.set(x, heightAt(x, z), z); b.g.rotation.y = b.face; scene.add(b.g); bunnies.push(b);
+  }
+}
+function bunnyHop(b, dx, dz, len, dur, h) {
+  const d = Math.hypot(dx, dz) || 1; let tx = b.x + dx / d * len, tz = b.z + dz / d * len;
+  if (inHollow(tx, tz, 1.5) || Math.hypot(tx, tz) > WALK_R - 0.5) { tx = b.x - dx / d * len; tz = b.z - dz / d * len; } // don't hop into the hollow or off the island
+  b.hop = { t: 0, dur, x0: b.x, z0: b.z, x1: tx, z1: tz, h }; b.face = Math.atan2(tx - b.x, tz - b.z);
+}
+function updateBunnies(dt, t) {
+  if (world !== 'outside') return;
+  for (const b of bunnies) {
+    const px = pPos.x - b.x, pz = pPos.y - b.z, pd = Math.hypot(px, pz);
+    const scared = pd < BUNNY_SCARE_R || (spell.t >= 0 && Math.hypot(b.x - spell.x, b.z - spell.z) < 6);
+    if (scared && b.state !== 'flee') { b.state = 'flee'; b.t = 0; b.hop = null; }
+    b.t += dt;
+    if (b.hop) { // mid-hop: arc through the air, stretch on takeoff, squash on landing
+      const h = b.hop; h.t += dt; const u = Math.min(1, h.t / h.dur);
+      b.x = h.x0 + (h.x1 - h.x0) * u; b.z = h.z0 + (h.z1 - h.z0) * u; b.y = Math.sin(u * Math.PI) * h.h;
+      if (u >= 1) { b.hop = null; b.y = 0; if (pd < 9) sfx.hop(0.08 * (1 - pd / 9)); }
+    } else if (b.state === 'eat') {
+      if (b.t > b.dur) { b.state = 'look'; b.t = 0; }
+    } else if (b.state === 'look') {
+      if (b.t > 0.6) { b.state = 'hop'; b.t = 0; b.hopsLeft = 1 + Math.floor(rnd() * 3); b.hx = rr(-1, 1); b.hz = rr(-1, 1); }
+    } else if (b.state === 'hop') {
+      if (b.hopsLeft <= 0) { b.state = 'eat'; b.t = 0; b.dur = rr(2, 5); }
+      else { b.hopsLeft--; bunnyHop(b, b.hx + rr(-0.4, 0.4), b.hz + rr(-0.4, 0.4), rr(0.8, 1.4), 0.38, 0.3); }
+    } else if (b.state === 'flee') {
+      if (!scared && b.t > 0.5) { b.state = 'look'; b.t = 0; }
+      else bunnyHop(b, -px + rr(-0.5, 0.5) * pd * 0.2, -pz + rr(-0.5, 0.5) * pd * 0.2, rr(1.5, 2.2), 0.27, 0.34);
+    }
+    for (const c of colliders) pushOut(b, c, 0.25);
+    const r = Math.hypot(b.x, b.z); if (r > WALK_R) { b.x *= WALK_R / r; b.z *= WALK_R / r; }
+    // pose
+    const g = b.g, u = b.hop ? b.hop.t / b.hop.dur : 0;
+    g.position.set(b.x, heightAt(b.x, b.z) + b.y, b.z);
+    g.rotation.y += Math.atan2(Math.sin(b.face - g.rotation.y), Math.cos(b.face - g.rotation.y)) * Math.min(1, dt * 14);
+    g.rotation.x = b.hop ? (0.5 - u) * 0.7 : 0;
+    g.scale.set(1, b.hop ? 1 + 0.12 * Math.sin(u * Math.PI) : 1, 1);
+    const eating = !b.hop && b.state === 'eat', alert = !b.hop && (b.state === 'look' || b.state === 'flee');
+    const headX = eating ? 0.75 + Math.sin(t * 16 + b.ph) * 0.09 : alert ? -0.2 : 0.1;
+    b.head.rotation.x += (headX - b.head.rotation.x) * Math.min(1, dt * 12);
+    b.head.position.y += ((eating ? 0.32 : 0.45) - b.head.position.y) * Math.min(1, dt * 10);
+    const twitch = Math.sin(t * 7 + b.ph) > 0.93 ? 0.35 : 0;
+    b.ears[0].rotation.z = 0.15 - (alert ? 0.12 : 0) + twitch * (eating ? 1 : 0); b.ears[1].rotation.z = -0.15 + (alert ? 0.12 : 0);
+  }
+}
+
 // ---------- audio: procedural music + sound effects (Web Audio, no asset files) ----------
 const audio = { ctx: null, muted: false, mood: '', chordIdx: 0, t: { chord: 0, bell: 3, crackle: 0 } };
 try { audio.muted = localStorage.getItem('spookie-muted') === '1'; } catch (e) { /* storage unavailable */ }
@@ -1414,6 +1488,7 @@ const sfxImpl = {
     else noise(0.07, 'lowpass', 500 + Math.random() * 200, 250, 0.06);
   },
   swing() { noise(0.18, 'bandpass', 800, 2600, 0.22, 0, 1.5); },
+  hop(v = 0.06) { tone(150, 0.07, 'sine', v, 80); noise(0.04, 'lowpass', 500, null, v * 0.6); },
   hit() { noise(0.1, 'lowpass', 1600, null, 0.28); tone(150, 0.12, 'square', 0.16, 60); },
   skelDie() { for (let i = 0; i < 6; i++) noise(0.04, 'highpass', 1800 + Math.random() * 1500, null, 0.18, i * 0.045); tone(90, 0.3, 'sine', 0.2, 45, 0.05); },
   hurt() { tone(190, 0.3, 'sawtooth', 0.28, 70); noise(0.2, 'lowpass', 500, null, 0.25); },
@@ -1503,7 +1578,7 @@ function updateAudio(dt) {
   }
 }
 
-window.__spookie = { updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+window.__spookie = { bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -1604,6 +1679,7 @@ function tick() {
   updateQuests(dt, t);
   updateHouse(dt, t);
   updateCombat(dt, t);
+  updateBunnies(dt, t);
   updateSpell(dt, t);
   updateAudio(dt);
 
