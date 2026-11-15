@@ -566,7 +566,7 @@ function hspot(minR = 3) { // a free random spot inside the hollow
 
 // ---------- the farm: chicken pen, windmill, wheat field, scarecrow (spooky) ----------
 const farm = { blades: null, uTime: { value: 0 }, chickens: [], arm: null, scare: null, mist: [], stareT: rr(30, 55), cluckT: 6, creakT: 4 };
-avoid.push({ x: PEN.x, z: PEN.z, r: 5.2 }, { x: FIELD.x, z: FIELD.z, r: 5.6 }, { x: MILL.x, z: MILL.z, r: 3.6 });
+avoid.push({ x: FARM.x + 0.5, z: FARM.z - 1.5, r: 2.5 }, { x: PEN.x, z: PEN.z, r: 5.2 }, { x: FIELD.x, z: FIELD.z, r: 5.6 }, { x: MILL.x, z: MILL.z, r: 3.6 });
 {
   const dead = mat(0x4a3a2c), bale = mat(0xb8a14a, { emissive: 0x403410, emissiveIntensity: 0.5 });
 
@@ -638,13 +638,14 @@ avoid.push({ x: PEN.x, z: PEN.z, r: 5.2 }, { x: FIELD.x, z: FIELD.z, r: 5.6 }, {
   box(1.8, 0.09, 0.09, woodDark, 0, 0, 0, arms);
   for (const x of [-0.8, -0.5, 0.5, 0.8]) box(0.06, 0.35, 0.03, burlap, x, -0.22, 0, arms); // tattered strips
   const pump = new THREE.Mesh(new THREE.SphereGeometry(0.3, 7, 5), M.pumpkin); pump.scale.y = 0.85; pump.position.y = 2.15; sc.add(pump);
-  box(0.09, 0.09, 0.05, M.glow, -0.12, 2.2, 0.26, sc); box(0.09, 0.09, 0.05, M.glow, 0.12, 2.2, 0.26, sc); box(0.28, 0.07, 0.05, M.glow, 0, 2.06, 0.27, sc);
+  const scGlow = new THREE.MeshBasicMaterial({ color: 0xffb347 }); farm.scGlow = scGlow;
+  box(0.09, 0.09, 0.05, scGlow, -0.12, 2.2, 0.26, sc); box(0.09, 0.09, 0.05, scGlow, 0.12, 2.2, 0.26, sc); box(0.28, 0.07, 0.05, scGlow, 0, 2.06, 0.27, sc);
   const hat = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.5, 6), mat(0x241c2c)); hat.position.y = 2.65; sc.add(hat);
   cyl(0.4, 0.4, 0.04, 8, mat(0x241c2c), 0, 2.42, 0, sc);
-  const sl = new THREE.PointLight(0xff8a2a, 5, 9, 1.6); sl.position.set(0, 2.15, 0.5); sl.userData.base = 5; flickers.push(sl); sc.add(sl);
+  const sl = new THREE.PointLight(0xff8a2a, 5, 9, 1.6); sl.position.set(0, 2.15, 0.5); sl.userData.base = 0.9; flickers.push(sl); sc.add(sl);
   sc.position.set(FIELD.x, 0, FIELD.z); sc.rotation.set(0.04, 0.3, 0.07);
   sc.traverse(o => { if (o.isMesh) o.castShadow = true; });
-  scene.add(sc); farm.arm = arms; farm.scare = sc;
+  scene.add(sc); farm.arm = arms; farm.scare = sc; farm.scLight = sl;
   colliders.push({ x: FIELD.x, z: FIELD.z, r: 0.4 });
 
   // --- wheat: dim and swaying; the sway is done on the GPU so hundreds of stalks stay cheap ---
@@ -674,6 +675,8 @@ avoid.push({ x: PEN.x, z: PEN.z, r: 5.2 }, { x: FIELD.x, z: FIELD.z, r: 5.6 }, {
     m4.compose(pos3, q, sc3); stalks.setMatrixAt(i, m4); ears.setMatrixAt(i, m4);
   });
   stalks.castShadow = false; ears.castShadow = false; scene.add(stalks, ears);
+  const order = cells.map((_, i) => i); for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+  farm.wheat = { stalks, ears, n: cells.length, backup: stalks.instanceMatrix.array.slice(), order, dead: 0 }; // lets quests trample the field
 
   // --- thin mist drifting over the field and pen ---
   for (const [x, z, r] of [[FIELD.x, FIELD.z, 4.2], [FIELD.x - 4, FIELD.z + 1, 3.2], [PEN.x, PEN.z, 3.4]]) {
@@ -715,7 +718,7 @@ function makeChicken(col) {
 function updateFarm(dt, t) {
   farm.uTime.value = t;
   farm.blades.rotation.z += dt * 0.4;                                   // slow, ominous
-  farm.arm.rotation.z = Math.sin(t * 1.1) * 0.08; farm.scare.rotation.z = 0.07 + Math.sin(t * 0.7) * 0.03;
+  farm.arm.rotation.z = Math.sin(t * 1.1) * 0.08 + (farm.awake ? 0.25 + Math.sin(t * 4) * 0.1 : 0); farm.scare.rotation.z = 0.07 + Math.sin(t * 0.7) * 0.03;
   for (const m of farm.mist) { const u = m.userData; m.position.x = u.x + Math.sin(t * 0.12 + u.ph) * 1.2; m.position.z = u.z + Math.cos(t * 0.09 + u.ph) * 0.8; m.material.opacity = 0.085 + Math.sin(t * 0.3 + u.ph) * 0.03; }
   if (world !== 'outside') return;
   const dm = Math.hypot(MILL.x - pPos.x, MILL.z - pPos.y);
@@ -1033,6 +1036,9 @@ function renderQuestHud() {
     : QUEST.state === 'ready' ? 'Return to Old Marrow by the fire' : 'Complete'));
   if (SQ.state !== 'none') parts.push(`<b>${SQ.title}</b><br>` + (SQ.state === 'active' ? `Find iron ore <span>${SQ.found}/${SQ.need}</span>`
     : SQ.state === 'ready' ? 'Return to Hob in the smithy' : 'Complete'));
+  if (NIGHT.state !== 'none') parts.push(`<b>${NIGHT.title}</b><br>` + (NIGHT.state === 'relight' ? 'Relight the scarecrow in the field'
+    : NIGHT.state === 'vigil' ? `Defend the field <span>wave ${Math.max(1, NIGHT.wave)}/${NIGHT.waves.length}</span> &middot; wheat <span>${Math.round(NIGHT.wheat * 100)}%</span>`
+    : NIGHT.state === 'ready' ? 'Return to Farmer Oda' : 'Complete'));
   ui.quest.style.display = parts.length ? 'block' : 'none';
   ui.quest.innerHTML = parts.join('<div style="height:6px"></div>');
 }
@@ -1095,7 +1101,7 @@ function advance() {
 function currentInteractable() {
   let best = null, bd = 1e9;
   for (const o of interactables) {
-    if (o.world !== world) continue;
+    if (o.world !== world || (o.enabled && !o.enabled())) continue;
     const p = o.getPos(), d = Math.hypot(p.x - pPos.x, p.z - pPos.y);
     if (d < o.r && d < bd) { best = o; bd = d; }
   }
@@ -1117,6 +1123,8 @@ function updateQuests(dt, t) {
   marker.position.y = 2.1 + Math.sin(t * 3) * 0.1; marker.rotation.y = t * 2;
   smithMarker.visible = SQ.state === 'none' || SQ.state === 'ready';
   smithMarker.position.y = 2.3 + Math.sin(t * 3) * 0.1; smithMarker.rotation.y = t * 2;
+  farmer.marker.visible = NIGHT.state === 'none' || NIGHT.state === 'ready';
+  farmer.marker.position.y = 2.5 + Math.sin(t * 3) * 0.1; farmer.marker.rotation.y = t * 2;
 
   // typewriter
   if (talking) {
@@ -1128,7 +1136,7 @@ function updateQuests(dt, t) {
     ui.dtext.textContent = line.slice(0, Math.floor(shown));
     ui.dnext.style.visibility = shown >= line.length ? 'visible' : 'hidden';
   }
-  for (const n of [npc, smith.group]) {
+  for (const n of [npc, smith.group, farmer.group]) {
     let want = n.userData.faceY;
     if (talking && n === talkNpc) want = Math.atan2(pPos.x - n.position.x, pPos.y - n.position.z);
     const d = Math.atan2(Math.sin(want - n.rotation.y), Math.cos(want - n.rotation.y));
@@ -1183,6 +1191,8 @@ function updateQuests(dt, t) {
   if (QUEST.state === 'ready') cands.push([npc.position.x, npc.position.z]);
   if (SQ.state === 'active' && nearestOre) cands.push([nearestOre.x, nearestOre.z]);
   if (SQ.state === 'ready') cands.push([HOUSE.x, HOUSE.z + HOUSE.hd]);
+  if (NIGHT.state === 'relight') cands.push([FIELD.x, FIELD.z]);
+  if (NIGHT.state === 'ready') cands.push([FARMER_POS.x, FARMER_POS.z]);
   let target = null, bestD = 1e9;
   for (const c of cands) { const d = Math.hypot(c[0] - pPos.x, c[1] - pPos.y); if (d < bestD) { bestD = d; target = c; } }
   if (target && !talking && world === 'outside') {
@@ -1193,10 +1203,9 @@ function updateQuests(dt, t) {
 
   if (toastT > 0 && (toastT -= dt) <= 0) ui.toast.classList.remove('on');
 }
-renderQuestHud();
 
 // ---------- combat ----------
-const HP_MAX = 5;
+let HP_MAX = 5;
 const combat = { hp: HP_MAX, inv: 0, atkT: 0, cd: 0, hit: false, inside: false, dead: false };
 const pk = new THREE.Vector2(); // player knockback velocity
 const enemies = [], pickups = [], fxPool = [];
@@ -1277,7 +1286,7 @@ function damageEnemy(e, dmg, dx, dz) {
   spawnFx(e.x, 1.1, e.z, 0xe8e0c8, 6);
   e.bar.visible = true; e.bar.scale.x = Math.max(0.01, e.hp / e.maxHp);
   if (e.hp <= 0) {
-    e.state = 'dead'; e.deadT = 0; e.respawnT = 30; sfx.skelDie();
+    e.state = 'dead'; e.deadT = 0; e.respawnT = e.raider ? 1e9 : 30; sfx.skelDie();
     spawnFx(e.x, 1.0, e.z, 0xe8e0c8, 10); spawnFx(e.x, 1.0, e.z, 0xff3b5c, 4);
     e.bone.emissive.setHex(0x000000);
     if (rnd() < 0.45) spawnHeart(e.x, e.z);
@@ -1313,7 +1322,8 @@ function playerDie() {
   combat.dead = true; transitioning = true; fadeEl.classList.add('on'); toast('You were defeated...');
   setTimeout(() => {
     combat.hp = HP_MAX; combat.dead = false; combat.inv = 2; slowT = 0; pPos.set(0, 0); pk.set(0, 0);
-    for (const e of enemies) if (e.state !== 'dead') { e.state = 'idle'; e.hp = e.maxHp; e.x = e.home.x; e.z = e.home.z; e.stun = 0; e.bar.visible = false; }
+    vigilFail(null);
+    for (const e of enemies) if (!e.raider && e.state !== 'dead') { e.state = 'idle'; e.hp = e.maxHp; e.x = e.home.x; e.z = e.home.z; e.stun = 0; e.bar.visible = false; }
     renderHearts();
     camera.position.set(pPos.x + CAM_OFFSET.x, CAM_OFFSET.y, pPos.y + CAM_OFFSET.z);
     fadeEl.classList.remove('on');
@@ -1389,6 +1399,14 @@ function updateCombat(dt, t) {
     let armT = 0.2;
     if (e.stun > 0) {
       e.stun -= dt; e.x += e.kx * dt; e.z += e.kz * dt; e.kx *= Math.max(0, 1 - dt * 7); e.kz *= Math.max(0, 1 - dt * 7);
+    } else if (e.state === 'raid' || e.state === 'trample') {
+      // raiders march on the scarecrow and trample the wheat; they fight back if you get close
+      if (combat.hp > 0 && dist < 5.5) e.state = 'chase';
+      else {
+        const sx = FIELD.x - e.x, sz = FIELD.z - e.z, sd = Math.hypot(sx, sz);
+        if (sd > 2.2) { e.state = 'raid'; stepTo(e, FIELD.x, FIELD.z, 2.3, dt); }
+        else { e.state = 'trample'; e.face = Math.atan2(sx, sz); armT = 0.5 + Math.sin(t * 9 + e.ph) * 0.6; }
+      }
     } else if (e.state === 'idle') {
       if (playerHere && dist < 7.5 && combat.hp > 0) { e.state = 'chase'; }
       else {
@@ -1397,7 +1415,7 @@ function updateCombat(dt, t) {
         if (Math.hypot(e.tx - e.x, e.tz - e.z) > 0.3) stepTo(e, e.tx, e.tz, 0.8, dt);
       }
     } else if (e.state === 'chase') {
-      if (!playerHere || dist > 16 || combat.hp <= 0) e.state = 'return';
+      if (!(playerHere || e.raider) || dist > 16 || combat.hp <= 0) e.state = e.raider ? 'raid' : 'return';
       else if (dist < 1.35) { e.state = 'windup'; e.t = 0; sfx.rattle(); }
       else stepTo(e, pPos.x, pPos.y, 2.8, dt);
     } else if (e.state === 'windup') {
@@ -1491,6 +1509,134 @@ function updateSpell(dt, t) {
   }
   if (p >= 1) { spell.t = -1; nova.visible = false; novaLight.intensity = 0; }
 }
+
+// ---------- third quest, from the farmer: The Night Watch (relight the scarecrow, hold the field) ----------
+// state: none -> relight -> vigil -> ready -> done   (a failed vigil drops back to relight)
+const NIGHT = {
+  title: 'The Night Watch', state: 'none', wave: 0, waves: [3, 4, 5], nextT: 0, wheat: 1, hudT: 0,
+  dialogue: {
+    none: [
+      'Oh! Thank the stars. A traveller.',
+      'That scarecrow is all that keeps the night-things off my wheat. Its light has guttered, and the bones are coming out of the hollow.',
+      'Relight it with your lantern. Then hold the field until the last of them falls.',
+      'Do not let them trample the wheat. It is all I have.',
+    ],
+    relight: ['The scarecrow is cold and dark. Hold your lantern to its pumpkin.', 'Hurry. I can hear them rattling.'],
+    vigil: ['Hold the field! Do not let them trample the wheat!'],
+    ready: [
+      'You held the field! I watched from the windmill... and the wheat is still standing.',
+      'The scarecrow burns steady now. Take this, a spark of its flame. It will keep you on your feet.',
+    ],
+    done: ['The scarecrow keeps watch every night now.', 'The skeletons still creep out of the hollow, but they stay away from my wheat. Safe travels.'],
+  },
+};
+const FARMER_POS = { x: FARM.x + 0.5, z: FARM.z - 1.5 };
+const farmer = { group: null };
+{
+  const g = new THREE.Group(), skin = mat(0xd9b99b), shawl = mat(0x5a6a3a), straw = mat(0xb89a50), dk = new THREE.MeshBasicMaterial({ color: 0x111111 });
+  const body = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.3, 7), shawl); body.position.y = 0.65; g.add(body);
+  box(0.7, 0.35, 0.4, mat(0x7a5a3a), 0, 1.15, 0, g);                                  // shoulders / shawl
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 6, 5), skin); head.position.y = 1.55; g.add(head);
+  cyl(0.5, 0.5, 0.04, 8, straw, 0, 1.75, 0, g);
+  const hatTop = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.4, 7), straw); hatTop.position.y = 1.97; g.add(hatTop);
+  box(0.06, 0.06, 0.04, dk, -0.09, 1.58, 0.23, g); box(0.06, 0.06, 0.04, dk, 0.09, 1.58, 0.23, g);
+  box(0.18, 0.18, 0.5, shawl, -0.45, 1.0, 0.2, g);
+  cyl(0.03, 0.03, 1.9, 5, M.bark, 0.5, 0.95, 0.15, g);                                 // pitchfork
+  for (const x of [-0.08, 0, 0.08]) box(0.025, 0.3, 0.025, steel, 0.5 + x, 1.95, 0.15, g);
+  box(0.28, 0.025, 0.025, steel, 0.5, 1.82, 0.15, g);
+  box(0.16, 0.2, 0.16, M.lantern, -0.45, 0.82, 0.5, g);                                 // her lantern
+  g.position.set(FARMER_POS.x, 0, FARMER_POS.z); g.rotation.y = 0.6; g.userData.faceY = 0.6;
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  const mk = new THREE.Group(), mm = new THREE.MeshBasicMaterial({ color: 0xffd34d });
+  box(0.14, 0.38, 0.14, mm, 0, 0.2, 0, mk); box(0.14, 0.14, 0.14, mm, 0, -0.1, 0, mk); g.add(mk); farmer.marker = mk;
+  scene.add(g); farmer.group = g;
+  colliders.push({ x: FARMER_POS.x, z: FARMER_POS.z, r: 0.5 });
+}
+
+// the scarecrow's flame, and the wheat's health (stalks vanish as it is trampled)
+function setScarecrowLit(on, strong) {
+  farm.scGlow.color.setHex(on ? 0xffb347 : 0x5a3f1e);
+  farm.scLight.userData.base = on ? (strong ? 9 : 7) : 0.9; farm.scLight.distance = on ? (strong ? 15 : 12) : 9;
+}
+function setWheatHealth(frac) {
+  const w = farm.wheat, target = Math.min(w.n, Math.floor((1 - frac) * w.n)), arr = w.stalks.instanceMatrix.array, earArr = w.ears.instanceMatrix.array;
+  while (w.dead > target) { const i = w.order[--w.dead]; for (let k = 0; k < 16; k++) { arr[i * 16 + k] = w.backup[i * 16 + k]; earArr[i * 16 + k] = w.backup[i * 16 + k]; } }
+  while (w.dead < target) { const i = w.order[w.dead++]; for (let k = 0; k < 16; k++) { arr[i * 16 + k] = 0; earArr[i * 16 + k] = 0; } }
+  w.stalks.instanceMatrix.needsUpdate = true; w.ears.instanceMatrix.needsUpdate = true;
+}
+setScarecrowLit(false);
+
+// raiders: skeletons that march from the hollow side on the scarecrow (they reuse the combat system)
+const raiders = [];
+{
+  for (let i = 0; i < 5; i++) {
+    const s = makeSkeleton();
+    const e = { ...s, raider: true, hp: 3, maxHp: 3, home: { x: FIELD.x, z: FIELD.z - 15 }, x: FIELD.x, z: FIELD.z - 15, face: 0, state: 'dead', t: 0, stun: 0, kx: 0, kz: 0, flash: 0, deadT: 99, respawnT: 1e9, wt: 0, tx: 0, tz: 0, ph: rnd() * 6 };
+    s.g.visible = false; scene.add(s.g); enemies.push(e); raiders.push(e);
+  }
+}
+function spawnWave() {
+  NIGHT.wave++;
+  const n = NIGHT.waves[NIGHT.wave - 1];
+  for (let i = 0; i < n; i++) {
+    const e = raiders[i]; respawn(e);
+    e.x = FIELD.x - 2 + rr(-3, 3); e.z = FIELD.z - 15 + rr(-2, 2); e.state = 'raid'; e.t = 0; e.respawnT = 1e9;
+    e.g.position.set(e.x, heightAt(e.x, e.z), e.z);
+  }
+  toast(`Wave ${NIGHT.wave} of ${NIGHT.waves.length}!`); sfx.horn(); renderQuestHud();
+}
+function startVigil() {
+  NIGHT.state = 'vigil'; NIGHT.wave = 0; NIGHT.nextT = 3; NIGHT.wheat = 1; farm.awake = true;
+  setWheatHealth(1); setScarecrowLit(true); renderQuestHud();
+  toast('The scarecrow wakes! Defend the field!');
+}
+function endVigilReset() { // clear the field and put things back
+  for (const e of raiders) { e.state = 'dead'; e.deadT = 99; e.g.visible = false; e.respawnT = 1e9; }
+  NIGHT.nextT = 0; farm.awake = false;
+}
+function vigilFail(msg) {
+  if (NIGHT.state !== 'vigil') return;
+  endVigilReset(); NIGHT.state = 'relight'; NIGHT.wheat = 1; setWheatHealth(1); setScarecrowLit(false); renderQuestHud();
+  if (msg) toast(msg);
+}
+function vigilWin() {
+  endVigilReset(); NIGHT.state = 'ready'; setScarecrowLit(true, true); renderQuestHud();
+  toast('The field is saved! Return to the farmer'); sfx.soul();
+}
+function updateVigil(dt) {
+  if (NIGHT.state !== 'vigil' || talking || transitioning) return;
+  if (NIGHT.nextT > 0) { NIGHT.nextT -= dt; if (NIGHT.nextT <= 0) spawnWave(); }
+  else {
+    let alive = 0, tramplers = 0;
+    for (const e of raiders) { if (e.state !== 'dead') alive++; if (e.state === 'trample') tramplers++; }
+    if (alive === 0) { if (NIGHT.wave >= NIGHT.waves.length) { vigilWin(); return; } NIGHT.nextT = 4; toast(`Wave ${NIGHT.wave} cleared`); }
+    if (tramplers) {
+      NIGHT.wheat = Math.max(0, NIGHT.wheat - tramplers * 0.008 * dt); setWheatHealth(NIGHT.wheat);
+      NIGHT.hudT -= dt; if (NIGHT.hudT <= 0) { NIGHT.hudT = 0.4; renderQuestHud(); }
+      if (NIGHT.wheat <= 0) vigilFail('The wheat is trampled... relight the scarecrow to try again');
+    }
+  }
+}
+
+function talkToFarmer() {
+  const st = NIGHT.state, d = NIGHT.dialogue[st];
+  openDialog('Farmer Oda', typeof d === 'function' ? d() : d, () => {
+    if (st === 'none') { NIGHT.state = 'relight'; toast('Quest started: The Night Watch'); }
+    else if (st === 'ready') {
+      NIGHT.state = 'done'; HP_MAX = 6; combat.hp = HP_MAX; renderHearts(); setScarecrowLit(true, true);
+      toast('Quest complete! +1 max heart');
+    }
+    renderQuestHud();
+  }, farmer.group);
+}
+function relightScarecrow() {
+  openDialog('Scarecrow', ['The pumpkin face is cold and dark.', 'You hold your lantern to it... the wick catches. Two eyes flare open.'], () => startVigil(), null);
+}
+interactables.push(
+  { world: 'outside', getPos: () => farmer.group.position, r: 3.2, label: 'TALK', act: talkToFarmer },
+  { world: 'outside', getPos: () => farm.scare.position, r: 2.6, label: 'RELIGHT', act: relightScarecrow, enabled: () => NIGHT.state === 'relight' },
+);
+renderQuestHud();
 
 // ---------- bunnies: nibble grass, hop around, scatter when you get close ----------
 const bunnies = [];
@@ -1876,7 +2022,7 @@ function updateAudio(dt) {
   }
 }
 
-window.__spookie = { farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+window.__spookie = { NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -1980,6 +2126,7 @@ function tick() {
   updateBunnies(dt, t);
   updateCrows(dt, t);
   updateFarm(dt, t);
+  updateVigil(dt);
   updateSpell(dt, t);
   updateAudio(dt);
 
