@@ -1171,6 +1171,7 @@ camera.lookAt(0, 0, 0);
 // ---------- input ----------
 const keys = new Set();
 addEventListener('keydown', e => {
+  if (menuOpen) { if (['Enter', 'Space', 'NumpadEnter'].includes(e.code)) { e.preventDefault(); startGame(); } return; }
   keys.add(e.code); hideHint();
   if (e.code === 'Escape' && crafting) closeCrafting();
   if (['KeyF', 'KeyJ'].includes(e.code) && !e.repeat) attack();
@@ -2076,7 +2077,7 @@ function renderCraft() {
   }).join('');
 }
 function openCrafting(kind) { craftKind = kind; crafting = true; ctitle.textContent = RECIPES[kind].title; renderCraft(); craftEl.classList.add('on'); }
-function closeCrafting() { crafting = false; craftEl.classList.remove('on'); }
+function closeCrafting() { if (menuOpen) return; crafting = false; craftEl.classList.remove('on'); }
 clist.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b || b.disabled) return;
   const r = RECIPES[craftKind].rows[+b.dataset.i];
@@ -2609,7 +2610,19 @@ function updateLightPool(dt) {
 }
 initLightPool();
 
-window.__spookie = { colliders, SQ, BR, BRIDGE, bridge, groundY, startBuild, setSawmillRunning, inv, SAW, nodes, addItem, openCrafting, closeCrafting, setFacing: a => { facing = a; }, SAWMILL, sawyer, sawmill, streamNearest, streamPush, isCutOff, STREAM_HW, STREAM_PTS, renderer, camera, scene, lightPool, lightSrc, GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+// ---------- start menu ----------
+const menuEl = $('menu');
+let menuOpen = !window.__skipMenu; // tests can skip the menu with window.__skipMenu = true
+const hintEl = $('hint');
+if (menuOpen) { crafting = true; hintEl.style.opacity = 0; } else menuEl.style.display = 'none'; // the control hint appears when the game starts
+function startGame() {
+  if (!menuOpen || menuEl.classList.contains('leaving')) return;
+  initAudio(); menuEl.classList.add('leaving'); fadeEl.classList.add('on');
+  setTimeout(() => { menuOpen = false; crafting = false; menuEl.classList.add('gone'); fadeEl.classList.remove('on'); hintEl.style.opacity = ''; }, 350);
+}
+$('newgame').addEventListener('click', startGame);
+
+window.__spookie = { startGame, menuState: () => ({ menuOpen, crafting }), colliders, SQ, BR, BRIDGE, bridge, groundY, startBuild, setSawmillRunning, inv, SAW, nodes, addItem, openCrafting, closeCrafting, setFacing: a => { facing = a; }, SAWMILL, sawyer, sawmill, streamNearest, streamPush, isCutOff, STREAM_HW, STREAM_PTS, renderer, camera, scene, lightPool, lightSrc, GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {

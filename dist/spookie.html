@@ -83,6 +83,20 @@
   #craft button { font: inherit; font-size: 13px; letter-spacing: 1px; padding: 8px 16px; color: #ffd9a8; background: rgba(255,154,60,.14); border: 1px solid #ff9a3c; cursor: pointer; }
   #craft button:disabled { opacity: .35; cursor: default; }
   #cclose { width: 100%; margin-top: 8px; }
+  #fade { z-index: 60; }
+  #menu { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center;
+    padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+    background: radial-gradient(ellipse at center, rgba(10,7,20,.3) 0%, rgba(10,7,20,.82) 65%, rgba(4,2,10,.96) 100%); transition: opacity .4s, visibility 0s .4s; }
+  #menu.gone { opacity: 0; visibility: hidden; pointer-events: none; }
+  #mtitle { font-size: clamp(40px, 13vw, 88px); letter-spacing: .25em; margin-right: -.25em; color: #ff9a3c; text-shadow: 0 0 18px #ff6a00, 0 0 48px rgba(255,106,0,.5); animation: flicker 5s infinite; }
+  #mtag { color: #8f86b8; font-size: 13px; letter-spacing: .14em; }
+  #newgame { margin-top: 30px; padding: 16px 44px; font: inherit; font-size: 18px; letter-spacing: .25em; color: #ffd9a8; background: rgba(255,154,60,.12);
+    border: 2px solid #ff9a3c; box-shadow: 0 0 22px rgba(255,106,0,.45); cursor: pointer; animation: pulse 2.6s ease-in-out infinite; }
+  #newgame:hover, #newgame:focus-visible { background: rgba(255,154,60,.3); outline: none; }
+  #mfoot { color: #5e5780; font-size: 11px; letter-spacing: .1em; margin-top: 6px; }
+  @keyframes flicker { 0%, 100% { opacity: 1; } 41% { opacity: .93; } 42% { opacity: .68; } 43% { opacity: 1; } 70% { opacity: .96; } 71% { opacity: .78; } 72% { opacity: 1; } }
+  @keyframes pulse { 50% { box-shadow: 0 0 36px rgba(255,106,0,.8); } }
+  @media (prefers-reduced-motion: reduce) { #mtitle, #newgame { animation: none; } }
   #hurt { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 90px 24px rgba(255,20,40,.65); opacity: 0; transition: opacity .2s; }
   #hurt.on { opacity: 1; }
   #stick {
@@ -101,6 +115,7 @@
 <div id="title">SPOOKIE</div>
 <div id="hint">WASD / arrows move &middot; Enter/E interact &middot; F/Space attack &middot; Q spell &middot; or touch &amp; drag</div>
 <div id="fade"></div>
+<div id="menu"><div id="mtitle">SPOOKIE</div><div id="mtag">Something is awake on the island.</div><button id="newgame">NEW GAME</button><div id="mfoot">tap, or press Enter</div></div>
 <div id="hurt"></div>
 <div id="hearts"></div>
 <div id="inv"></div>
@@ -54333,6 +54348,7 @@ camera.lookAt(0, 0, 0);
 // ---------- input ----------
 const keys = new Set();
 addEventListener('keydown', e => {
+  if (menuOpen) { if (['Enter', 'Space', 'NumpadEnter'].includes(e.code)) { e.preventDefault(); startGame(); } return; }
   keys.add(e.code); hideHint();
   if (e.code === 'Escape' && crafting) closeCrafting();
   if (['KeyF', 'KeyJ'].includes(e.code) && !e.repeat) attack();
@@ -55238,7 +55254,7 @@ function renderCraft() {
   }).join('');
 }
 function openCrafting(kind) { craftKind = kind; crafting = true; ctitle.textContent = RECIPES[kind].title; renderCraft(); craftEl.classList.add('on'); }
-function closeCrafting() { crafting = false; craftEl.classList.remove('on'); }
+function closeCrafting() { if (menuOpen) return; crafting = false; craftEl.classList.remove('on'); }
 clist.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b || b.disabled) return;
   const r = RECIPES[craftKind].rows[+b.dataset.i];
@@ -55771,7 +55787,19 @@ function updateLightPool(dt) {
 }
 initLightPool();
 
-window.__spookie = { colliders, SQ, BR, BRIDGE, bridge, groundY, startBuild, setSawmillRunning, inv, SAW, nodes, addItem, openCrafting, closeCrafting, setFacing: a => { facing = a; }, SAWMILL, sawyer, sawmill, streamNearest, streamPush, isCutOff, STREAM_HW, STREAM_PTS, renderer, camera, scene, lightPool, lightSrc, GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+// ---------- start menu ----------
+const menuEl = $('menu');
+let menuOpen = !window.__skipMenu; // tests can skip the menu with window.__skipMenu = true
+const hintEl = $('hint');
+if (menuOpen) { crafting = true; hintEl.style.opacity = 0; } else menuEl.style.display = 'none'; // the control hint appears when the game starts
+function startGame() {
+  if (!menuOpen || menuEl.classList.contains('leaving')) return;
+  initAudio(); menuEl.classList.add('leaving'); fadeEl.classList.add('on');
+  setTimeout(() => { menuOpen = false; crafting = false; menuEl.classList.add('gone'); fadeEl.classList.remove('on'); hintEl.style.opacity = ''; }, 350);
+}
+$('newgame').addEventListener('click', startGame);
+
+window.__spookie = { startGame, menuState: () => ({ menuOpen, crafting }), colliders, SQ, BR, BRIDGE, bridge, groundY, startBuild, setSawmillRunning, inv, SAW, nodes, addItem, openCrafting, closeCrafting, setFacing: a => { facing = a; }, SAWMILL, sawyer, sawmill, streamNearest, streamPush, isCutOff, STREAM_HW, STREAM_PTS, renderer, camera, scene, lightPool, lightSrc, GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
