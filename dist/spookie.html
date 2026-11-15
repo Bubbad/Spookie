@@ -53162,6 +53162,17 @@ const PEN = { x: FARM.x - 7, z: FARM.z - 2, hw: 3.5, hd: 2.5 };       // chicken
 const FIELD = { x: FARM.x + 1.5, z: FARM.z + 4.5, hw: 4.5, hd: 3 };   // wheat field
 const MILL = { x: FARM.x + 8, z: FARM.z - 4 };                        // windmill
 const HOLLOW = { x: 14, z: -14, r: 9 }; // the Blighted Hollow (hostile area)
+const GROVE = { x: -32, z: -8, r: 10 };               // the Crystal Grove (far west)
+const CRYSTAL_COLS = [0x35e0ff, 0xff3df0, 0x7dff3a, 0xffb02e, 0x8a5bff, 0xff3a5a]; // cyan, magenta, lime, amber, violet, red
+const GROVE_CLUSTERS = (() => {
+  let seed = 4242; const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647, out = [];
+  for (let i = 0; i < 15; i++) {
+    let x = GROVE.x, z = GROVE.z, tries = 0;
+    if (i > 0) do { const a = r() * 6.283, d = Math.sqrt(r()) * (GROVE.r - 1.5); x = GROVE.x + Math.cos(a) * d; z = GROVE.z + Math.sin(a) * d; tries++; } while (tries < 40 && out.some(o => Math.hypot(o.x - x, o.z - z) < 3.2));
+    out.push({ x, z, ci: i % 6, h: i === 0 ? 3.8 : 1.2 + r() * 2.3 });
+  }
+  return out;
+})();
 const HOUSE = { x: -11, z: 10, hw: 3, hd: 2.5 }; // blacksmith house (door faces +z)
 
 // gentle rolling hills
@@ -53226,13 +53237,15 @@ function buildTerrain() {
   flat.computeVertexNormals();
   const pos = flat.attributes.position;
   const colors = new Float32Array(pos.count * 3);
-  const grassA = new THREE.Color(0x2f6b3a), grassB = new THREE.Color(0x3f7f3c), dirt = new THREE.Color(0x3a2c24), blight = new THREE.Color(0x2c1f3a), tilled = new THREE.Color(0x2e2018), straw = new THREE.Color(0x4a3d22), c = new THREE.Color();
+  const grassA = new THREE.Color(0x2f6b3a), grassB = new THREE.Color(0x3f7f3c), dirt = new THREE.Color(0x3a2c24), blight = new THREE.Color(0x2c1f3a), tilled = new THREE.Color(0x2e2018), straw = new THREE.Color(0x4a3d22), crystalGround = new THREE.Color(0x1d2540), c = new THREE.Color();
   for (let i = 0; i < pos.count; i += 3) {
     const cx = (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3, cy = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3, cz = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3;
     c.copy(grassA).lerp(grassB, rnd()).multiplyScalar(0.7 + rnd() * 0.3);
     if (cy < -0.5 || Math.hypot(cx, cz) > WORLD_R - 1.5) c.copy(dirt).multiplyScalar(0.8 + rnd() * 0.4);
     if (Math.abs(cx - FIELD.x) < FIELD.hw + 0.4 && Math.abs(cz - FIELD.z) < FIELD.hd + 0.4) c.copy(tilled).multiplyScalar(0.8 + 0.4 * Math.abs(Math.sin(cx * 9.1 + cz * 3.7)));
     else if (Math.abs(cx - PEN.x) < PEN.hw + 0.3 && Math.abs(cz - PEN.z) < PEN.hd + 0.3) c.copy(straw).multiplyScalar(0.8 + 0.4 * Math.abs(Math.sin(cx * 7.3 + cz * 5.1)));
+    const dg = Math.hypot(cx - GROVE.x, cz - GROVE.z); // dark blue-violet ground in the crystal grove
+    if (dg < GROVE.r + 1) c.lerp(crystalGround.clone().multiplyScalar(0.8 + 0.5 * Math.abs(Math.sin(cx * 8.3 + cz * 6.1))), smooth(GROVE.r + 1, GROVE.r - 3, dg) * 0.9);
     const dh = Math.hypot(cx - HOLLOW.x, cz - HOLLOW.z); // corrupted ground inside the hollow
     if (dh < HOLLOW.r + 1) c.lerp(blight.clone().multiplyScalar(0.7 + 0.5 * Math.abs(Math.sin(cx * 12.9 + cz * 78.2))), smooth(HOLLOW.r + 1, HOLLOW.r - 2, dh));
     for (let k = 0; k < 3; k++) colors.set([c.r, c.g, c.b], (i + k) * 3);
@@ -53916,6 +53929,64 @@ function updateFarm(dt, t) {
   }
 }
 
+// ---------- the Crystal Grove: sharp glowing crystals that light up their surroundings ----------
+avoid.push({ x: GROVE.x, z: GROVE.z, r: GROVE.r + 1.5 });
+const grove = { mats: [], decals: [], sparks: [], inside: false };
+{
+  // a faceted, pointed crystal: a 6-sided lathe with a sharp tip
+  const crystalG = new THREE.LatheGeometry([new THREE.Vector2(0, 0), new THREE.Vector2(0.32, 0.3), new THREE.Vector2(0.27, 1.0), new THREE.Vector2(0, 1.7)], 6);
+  const rockG = new THREE.DodecahedronGeometry(0.55, 0), rockM = mat(0x2a2a3a);
+  // soft round glow texture used for the light pools on the ground and the sparkles
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const cx = cv.getContext('2d'), gr = cx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(0.4, 'rgba(255,255,255,0.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  cx.fillStyle = gr; cx.fillRect(0, 0, 128, 128);
+  const glowTex = new THREE.CanvasTexture(cv);
+  grove.mats = CRYSTAL_COLS.map(col => mat(col, { emissive: col, emissiveIntensity: 1.4, roughness: 0.25, metalness: 0.2 }));
+  grove.decals = CRYSTAL_COLS.map(col => new THREE.MeshBasicMaterial({ color: col, map: glowTex, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const decalG = new THREE.PlaneGeometry(1, 1);
+  const biggest = [...GROVE_CLUSTERS].sort((a, b) => b.h - a.h).slice(0, 3);
+  for (const cl of GROVE_CLUSTERS) {
+    const y0 = heightAt(cl.x, cl.z), grp = new THREE.Group();
+    const rock = new THREE.Mesh(rockG, rockM); rock.scale.set(1.3, 0.5, 1.3); rock.position.y = 0.1; grp.add(rock);
+    const n = 3 + Math.floor(rnd() * 4);
+    for (let i = 0; i < n; i++) {
+      const h = i === 0 ? cl.h : cl.h * rr(0.35, 0.7), a = rnd() * Math.PI * 2, off = i === 0 ? 0 : rr(0.4, 1.0), tilt = i === 0 ? rr(-0.08, 0.08) : rr(0.2, 0.55), sw = (0.7 + 0.25 * h) * rr(0.85, 1.2);
+      const m = new THREE.Mesh(crystalG, grove.mats[cl.ci]);
+      m.scale.set(sw, h / 1.7, sw); m.position.set(Math.cos(a) * off, 0.1, Math.sin(a) * off);
+      m.rotation.set(Math.sin(a) * tilt, rnd() * 3, -Math.cos(a) * tilt); grp.add(m);
+    }
+    grp.position.set(cl.x, y0, cl.z); scene.add(grp);
+    colliders.push({ x: cl.x, z: cl.z, r: 0.5 + 0.18 * cl.h });
+    const sz = 5.5 + cl.h * 1.8, decal = new THREE.Mesh(decalG, grove.decals[cl.ci]);
+    decal.scale.set(sz, sz, 1); decal.rotation.x = -Math.PI / 2; decal.position.set(cl.x, y0 + 0.07, cl.z); decal.renderOrder = 2; scene.add(decal);
+    if (biggest.includes(cl)) { // a few clusters also cast real coloured light on the player and nearby objects
+      const l = new THREE.PointLight(CRYSTAL_COLS[cl.ci], 9, 12, 1.6); l.position.set(cl.x, y0 + cl.h * 0.6, cl.z); l.userData.base = 9; flickers.push(l); scene.add(l);
+    }
+  }
+  // sparkles drifting up through the grove
+  const spG = new THREE.OctahedronGeometry(0.07, 0);
+  const spM = CRYSTAL_COLS.map(col => new THREE.MeshBasicMaterial({ color: col, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+  for (let i = 0; i < 60; i++) {
+    const a = rnd() * Math.PI * 2, d = Math.sqrt(rnd()) * (GROVE.r - 1), m = new THREE.Mesh(spG, spM[i % 6]);
+    m.userData = { x: GROVE.x + Math.cos(a) * d, z: GROVE.z + Math.sin(a) * d, sp: rr(0.12, 0.3), ph: rnd() * 10 };
+    scene.add(m); grove.sparks.push(m);
+  }
+}
+function updateGrove(dt, t) {
+  grove.mats.forEach((m, i) => { m.emissiveIntensity = 1.3 + 0.45 * Math.sin(t * 1.4 + i * 1.1); });   // slow pulse, each colour out of step
+  grove.decals.forEach((m, i) => { m.opacity = 0.5 + 0.13 * Math.sin(t * 1.4 + i * 1.1); });
+  for (const s of grove.sparks) {
+    const u = s.userData, f = (t * u.sp + u.ph) % 1;
+    s.position.set(u.x + Math.sin(t * 0.7 + u.ph) * 0.5, heightAt(u.x, u.z) + 0.3 + f * 3.8, u.z + Math.cos(t * 0.6 + u.ph) * 0.5);
+    s.scale.setScalar(Math.max(0.05, Math.sin(f * Math.PI)));
+  }
+  if (world !== 'outside') { grove.inside = false; return; }
+  const nowIn = Math.hypot(pPos.x - GROVE.x, pPos.y - GROVE.z) < GROVE.r - 1;
+  if (nowIn && !grove.inside) toast('The Crystal Grove hums with light...');
+  grove.inside = nowIn;
+}
+
 // graveyard patch near the middle-ish, trees around, pumpkins scattered
 for (let i = 0; i < 16; i++) { // tombstones in a cluster
   const a = rnd() * 6.28, d = Math.sqrt(rr(16, 90));
@@ -53936,7 +54007,7 @@ for (let i = 0; i < 20; i++) { const [x, z] = spot(4, WALK_R - 1); place(pumpkin
     const a = rnd() * 6.28, d = Math.sqrt(rnd()) * (WORLD_R - 2), x = Math.cos(a) * d, z = Math.sin(a) * d;
     pos.set(x, heightAt(x, z), z);
     q.setFromEuler(new THREE.Euler(rr(-0.2, 0.2), rnd() * 6.28, rr(-0.2, 0.2)));
-    const inFarm = (Math.abs(x - FIELD.x) < FIELD.hw + 0.5 && Math.abs(z - FIELD.z) < FIELD.hd + 0.5) || (Math.abs(x - PEN.x) < PEN.hw + 0.5 && Math.abs(z - PEN.z) < PEN.hd + 0.5);
+    const inFarm = (Math.abs(x - FIELD.x) < FIELD.hw + 0.5 && Math.abs(z - FIELD.z) < FIELD.hd + 0.5) || (Math.abs(x - PEN.x) < PEN.hw + 0.5 && Math.abs(z - PEN.z) < PEN.hd + 0.5) || Math.hypot(x - GROVE.x, z - GROVE.z) < GROVE.r - 1;
     s.setScalar(inFarm ? 0.0001 : rr(0.7, 1.6)); // no grass tufts poking through the field or pen
     inst.setMatrixAt(i, m.compose(pos, q, s));
     inst.setColorAt(i, col.setHSL(rr(0.25, 0.36), 0.45, rr(0.2, 0.34)));
@@ -54947,7 +55018,7 @@ function updateCrows(dt, t) {
 }
 
 // ---------- audio: procedural music + sound effects (Web Audio, no asset files) ----------
-const audio = { ctx: null, muted: false, mood: '', chordIdx: 0, t: { chord: 0, bell: 3, crackle: 0 } };
+const audio = { ctx: null, muted: false, mood: '', chordIdx: 0, t: { chord: 0, bell: 3, crackle: 0, chime: 2 } };
 try { audio.muted = localStorage.getItem('spookie-muted') === '1'; } catch (e) { /* storage unavailable */ }
 const soundBtn = $('sound');
 function renderSoundBtn() { soundBtn.classList.toggle('muted', audio.muted); soundBtn.title = audio.muted ? 'Sound off (M)' : 'Sound on (M)'; }
@@ -55041,6 +55112,11 @@ function initAudio() {
   const gf = ctx.createBiquadFilter(); gf.type = 'lowpass'; gf.frequency.value = 600; gf.connect(L.ghost);
   const gl = ctx.createOscillator(); gl.frequency.value = 5; const glg = ctx.createGain(); glg.gain.value = 4; gl.connect(glg); gl.start();
   for (const f of [196, 198]) { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; glg.connect(o.frequency); const g = ctx.createGain(); g.gain.value = 0.5; o.connect(g); g.connect(gf); o.start(); }
+  // crystal hum: two shimmering sines that fade in as you approach the grove
+  L.crystal = mk();
+  const cf = ctx.createBiquadFilter(); cf.type = 'lowpass'; cf.frequency.value = 1800; cf.connect(L.crystal);
+  const ctrem = ctx.createGain(); ctrem.gain.value = 0.6; ctrem.connect(cf); lfoTo(0.35, 0.3, ctrem.gain);
+  for (const f of [659.25, 661, 987.77]) { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; const g = ctx.createGain(); g.gain.value = 0.33; o.connect(g); g.connect(ctrem); o.start(); }
   // music-box bells bus
   L.bell = mk(); L.bell.connect(rev);
   audio.mood = ''; audio.t.chord = 0;
@@ -55081,6 +55157,7 @@ const sfxImpl = {
   caw(v = 0.1) { for (const [d, f] of [[0, 520], [0.24, 450]]) { tone(f, 0.17, 'sawtooth', v, f * 0.62, d); noise(0.16, 'bandpass', 1300, 700, v * 0.9, d, 3); } },
   cluck(v = 0.08) { tone(720, 0.05, 'square', v, 520); tone(640, 0.07, 'square', v * 0.9, 420, 0.07); noise(0.05, 'bandpass', 1500, 900, v * 0.5, 0, 2); },
   creak(v = 0.08) { tone(70, 0.7, 'sawtooth', v, 120); tone(105, 0.6, 'sawtooth', v * 0.6, 170, 0.1); noise(0.6, 'bandpass', 260, 520, v * 0.9, 0, 5); },
+  glint() { [1318.5, 1760, 2093].forEach((f, i) => bell(f, 0.12, i * 0.08, audio.jb)); },
   hop(v = 0.06) { tone(150, 0.07, 'sine', v, 80); noise(0.04, 'lowpass', 500, null, v * 0.6); },
   hit() { noise(0.1, 'lowpass', 1600, null, 0.28); tone(150, 0.12, 'square', 0.16, 60); },
   skelDie() { for (let i = 0; i < 6; i++) noise(0.04, 'highpass', 1800 + Math.random() * 1500, null, 0.18, i * 0.045); tone(90, 0.3, 'sine', 0.2, 45, 0.05); },
@@ -55115,6 +55192,7 @@ function sfxForToast(m) { // play a matching sound for a toast message
   else if (m.startsWith('A cold chill')) sfx.chill();
   else if (m.startsWith('You were defeated')) sfx.defeat();
   else if (m.startsWith('The Blighted')) sfx.horn();
+  else if (m.startsWith('The Crystal')) sfx.glint();
 }
 
 function crackle() { // wood snaps and pops: uneven loudness, sometimes in quick bursts
@@ -55144,6 +55222,12 @@ function updateAudio(dt) {
   set(L.wind, house ? 0.04 : inH ? 0.3 : 0.4);
   let gd = 99; if (out) for (const g of ghosts) gd = Math.min(gd, Math.hypot(g.position.x - pPos.x, g.position.z - pPos.y));
   set(L.ghost, out ? Math.max(0, 1 - gd / 9) * 0.12 : 0, 0.3);
+  const dgr = out ? Math.hypot(GROVE.x - pPos.x, GROVE.z - pPos.y) : 99;
+  set(L.crystal, Math.pow(Math.max(0, 1 - dgr / 22), 1.5) * 0.08, 0.4);
+  if (dgr < 16) { // glassy chimes that get louder the closer you are
+    audio.t.chime -= dt;
+    if (audio.t.chime <= 0) { audio.t.chime = 2.5 + Math.random() * 3; bell([1046.5, 1318.5, 1568, 1760, 2093][Math.floor(Math.random() * 5)], 0.03 + 0.12 * (1 - dgr / 16), 0, audio.jb); }
+  }
   if (mood !== audio.mood) { audio.mood = mood; audio.t.chord = 0; audio.t.bell = 1.2; }
   const M_ = MOODS[mood];
   audio.t.chord -= dt;
@@ -55171,7 +55255,7 @@ function updateAudio(dt) {
   }
 }
 
-window.__spookie = { NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+window.__spookie = { GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -55276,6 +55360,7 @@ function tick() {
   updateCrows(dt, t);
   updateFarm(dt, t);
   updateVigil(dt);
+  updateGrove(dt, t);
   updateSpell(dt, t);
   updateAudio(dt);
 
