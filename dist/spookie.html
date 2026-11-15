@@ -54516,14 +54516,14 @@ let toastT = 0;
 function toast(msg) { sfxForToast(msg); ui.toast.textContent = msg; ui.toast.classList.add('on'); toastT = 3; }
 function renderQuestHud() {
   const parts = [];
-  if (QUEST.state !== 'none') parts.push(`<b>${QUEST.title}</b><br>` + (QUEST.state === 'active' ? `Find the lost souls <span>${QUEST.found}/${QUEST.need}</span>`
+  if (QUEST.state !== 'none' && QUEST.state !== 'done') parts.push(`<b>${QUEST.title}</b><br>` + (QUEST.state === 'active' ? `Find the lost souls <span>${QUEST.found}/${QUEST.need}</span>`
     : QUEST.state === 'ready' ? 'Return to Old Marrow by the fire' : 'Complete'));
-  if (SQ.state !== 'none') parts.push(`<b>${SQ.title}</b><br>` + (SQ.state === 'active' ? `Find iron ore <span>${SQ.found}/${SQ.need}</span>`
+  if (SQ.state !== 'none' && SQ.state !== 'done') parts.push(`<b>${SQ.title}</b><br>` + (SQ.state === 'active' ? `Find iron ore <span>${SQ.found}/${SQ.need}</span>`
     : SQ.state === 'ready' ? 'Return to Hob in the smithy' : 'Complete'));
-  if (SAW.state !== 'none') parts.push(`<b>${SAW.title}</b><br>` + (SAW.state === 'wood' ? `Chop logs from dead trees <span>${Math.min(inv.logs, SAW.need)}/${SAW.need}</span>`
+  if (SAW.state !== 'none' && SAW.state !== 'done') parts.push(`<b>${SAW.title}</b><br>` + (SAW.state === 'wood' ? `Chop logs from dead trees <span>${Math.min(inv.logs, SAW.need)}/${SAW.need}</span>`
     : SAW.state === 'ready' ? 'Bring the logs to Bram' : SAW.state === 'repair' ? 'Pull the lever on the saw bench' : 'Complete'));
-  if (BR.state !== 'none') parts.push(`<b>${BR.title}</b><br>` + (BR.state === 'gather' ? `Build the bridge: planks <span>${Math.min(inv.planks, BR.planks)}/${BR.planks}</span>, nails <span>${Math.min(inv.nails, BR.nails)}/${BR.nails}</span>` : 'Complete'));
-  if (NIGHT.state !== 'none') parts.push(`<b>${NIGHT.title}</b><br>` + (NIGHT.state === 'relight' ? 'Relight the scarecrow in the field'
+  if (BR.state !== 'none' && BR.state !== 'done') parts.push(`<b>${BR.title}</b><br>` + (BR.state === 'gather' ? `Build the bridge: planks <span>${Math.min(inv.planks, BR.planks)}/${BR.planks}</span>, nails <span>${Math.min(inv.nails, BR.nails)}/${BR.nails}</span>` : 'Complete'));
+  if (NIGHT.state !== 'none' && NIGHT.state !== 'done') parts.push(`<b>${NIGHT.title}</b><br>` + (NIGHT.state === 'relight' ? 'Relight the scarecrow in the field'
     : NIGHT.state === 'vigil' ? `Defend the field <span>wave ${Math.max(1, NIGHT.wave)}/${NIGHT.waves.length}</span> &middot; wheat <span>${Math.round(NIGHT.wheat * 100)}%</span>`
     : NIGHT.state === 'ready' ? 'Return to Farmer Oda' : 'Complete'));
   ui.quest.style.display = parts.length ? 'block' : 'none';
