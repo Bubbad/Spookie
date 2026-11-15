@@ -24,12 +24,44 @@ const GROVE_CLUSTERS = (() => {
   }
   return out;
 })();
+// A stream runs the whole way across the island, west of the graveyard, and off the edge of the world at both ends.
+// The Crystal Grove lies on the far side. The water is solid; a bridge will be added later.
+const STREAM_HW = 2.2; // blocking half-width (the visible water edge is ~2.5)
+const STREAM_PTS = new THREE.CatmullRomCurve3([[-22, -54], [-18, -38], [-20.5, -24], [-19.5, -8], [-21, 6], [-19, 22], [-21.5, 38], [-25, 54]].map(([x, z]) => new THREE.Vector3(x, 0, z)), false, 'centripetal').getPoints(110).map(v => ({ x: v.x, z: v.z }));
+const STREAM_X0 = Math.min(...STREAM_PTS.map(p => p.x)), STREAM_X1 = Math.max(...STREAM_PTS.map(p => p.x));
+const _sn = { d: 0, cx: 0, cz: 0 }, _sp = [0, 0];
+function streamNearest(x, z) { // nearest point on the stream's centre line (null when far away: cheap early-out)
+  if (x < STREAM_X0 - 12 || x > STREAM_X1 + 12) return null;
+  let best = 1e9;
+  for (let i = 0; i < STREAM_PTS.length - 1; i++) {
+    const a = STREAM_PTS[i], b = STREAM_PTS[i + 1], abx = b.x - a.x, abz = b.z - a.z;
+    const t = Math.max(0, Math.min(1, ((x - a.x) * abx + (z - a.z) * abz) / (abx * abx + abz * abz || 1)));
+    const cx = a.x + t * abx, cz = a.z + t * abz, d2 = (x - cx) ** 2 + (z - cz) ** 2;
+    if (d2 < best) { best = d2; _sn.cx = cx; _sn.cz = cz; }
+  }
+  _sn.d = Math.sqrt(best); return _sn;
+}
+function streamPush(x, z, r) { // push a body of radius r out of the water; returns a shared [x, z]
+  _sp[0] = x; _sp[1] = z;
+  const n = streamNearest(x, z);
+  if (n && n.d < STREAM_HW + r) { const k = (STREAM_HW + r) / (n.d || 0.0001); _sp[0] = n.cx + (x - n.cx) * k; _sp[1] = n.cz + (z - n.cz) * k; }
+  return _sp;
+}
+function nearStream(x, z, pad) { const n = streamNearest(x, z); return !!n && n.d < STREAM_HW + pad; }
+function streamXAt(z) { // x of the stream's centre line at this z (it always runs north to south)
+  for (let i = 0; i < STREAM_PTS.length - 1; i++) { const a = STREAM_PTS[i], b = STREAM_PTS[i + 1]; if (z >= a.z && z <= b.z) return a.x + (b.x - a.x) * (z - a.z) / ((b.z - a.z) || 1); }
+  return z < STREAM_PTS[0].z ? STREAM_PTS[0].x : STREAM_PTS[STREAM_PTS.length - 1].x;
+}
+const isCutOff = (x, z) => x < streamXAt(z); // on the far (west) side of the water, where nothing the player must reach may spawn
 const HOUSE = { x: -11, z: 10, hw: 3, hd: 2.5 }; // blacksmith house (door faces +z)
 
 // gentle rolling hills
 function heightAt(x, z) {
   const h = Math.sin(x * 0.21) * Math.cos(z * 0.17) * 0.8 + Math.sin(x * 0.07 + z * 0.09) * 0.9;
-  return h * smooth(2, 8, Math.hypot(x, z)) * smooth(5, 9, Math.hypot(x - HOUSE.x, z - HOUSE.z)) * smooth(10, 14, Math.hypot(x - FARM.x, z - FARM.z)); // keep spawn, house and farm flat
+  const base = h * smooth(2, 8, Math.hypot(x, z)) * smooth(5, 9, Math.hypot(x - HOUSE.x, z - HOUSE.z)) * smooth(10, 14, Math.hypot(x - FARM.x, z - FARM.z)); // keep spawn, house and farm flat
+  const n = streamNearest(x, z);
+  if (!n) return base;
+  return base * smooth(5.5, 11, n.d) - 0.9 * (1 - smooth(1.0, 3.6, n.d)); // hills flatten toward the stream, then the channel dips below the waterline
 }
 
 // ---------- renderer / scene ----------
@@ -88,7 +120,7 @@ function buildTerrain() {
   flat.computeVertexNormals();
   const pos = flat.attributes.position;
   const colors = new Float32Array(pos.count * 3);
-  const grassA = new THREE.Color(0x2f6b3a), grassB = new THREE.Color(0x3f7f3c), dirt = new THREE.Color(0x3a2c24), blight = new THREE.Color(0x2c1f3a), tilled = new THREE.Color(0x2e2018), straw = new THREE.Color(0x4a3d22), crystalGround = new THREE.Color(0x1d2540), c = new THREE.Color();
+  const grassA = new THREE.Color(0x2f6b3a), grassB = new THREE.Color(0x3f7f3c), dirt = new THREE.Color(0x3a2c24), blight = new THREE.Color(0x2c1f3a), tilled = new THREE.Color(0x2e2018), straw = new THREE.Color(0x4a3d22), crystalGround = new THREE.Color(0x1d2540), mud = new THREE.Color(0x2b2619), bed = new THREE.Color(0x151a24), c = new THREE.Color();
   for (let i = 0; i < pos.count; i += 3) {
     const cx = (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3, cy = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3, cz = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3;
     c.copy(grassA).lerp(grassB, rnd()).multiplyScalar(0.7 + rnd() * 0.3);
@@ -97,6 +129,8 @@ function buildTerrain() {
     else if (Math.abs(cx - PEN.x) < PEN.hw + 0.3 && Math.abs(cz - PEN.z) < PEN.hd + 0.3) c.copy(straw).multiplyScalar(0.8 + 0.4 * Math.abs(Math.sin(cx * 7.3 + cz * 5.1)));
     const dg = Math.hypot(cx - GROVE.x, cz - GROVE.z); // dark blue-violet ground in the crystal grove
     if (dg < GROVE.r + 1) c.lerp(crystalGround.clone().multiplyScalar(0.8 + 0.5 * Math.abs(Math.sin(cx * 8.3 + cz * 6.1))), smooth(GROVE.r + 1, GROVE.r - 3, dg) * 0.9);
+    const ds = streamNearest(cx, cz); // muddy banks and a dark bed along the stream
+    if (ds && ds.d < 4.2) c.lerp(ds.d < 2.3 ? bed : mud, ds.d < 2.3 ? 0.95 : smooth(4.2, 2.3, ds.d) * 0.9);
     const dh = Math.hypot(cx - HOLLOW.x, cz - HOLLOW.z); // corrupted ground inside the hollow
     if (dh < HOLLOW.r + 1) c.lerp(blight.clone().multiplyScalar(0.7 + 0.5 * Math.abs(Math.sin(cx * 12.9 + cz * 78.2))), smooth(HOLLOW.r + 1, HOLLOW.r - 2, dh));
     for (let k = 0; k < 3; k++) colors.set([c.r, c.g, c.b], (i + k) * 3);
@@ -127,7 +161,7 @@ const spot = (minR = 4, maxR = WORLD_R - 3) => {
   for (;;) {
     const a = rnd() * Math.PI * 2, d = Math.sqrt(rr(minR * minR, maxR * maxR));
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
-    if (colliders.every(c => Math.hypot(c.x - x, c.z - z) > c.r + 1.4) && avoid.every(c => Math.hypot(c.x - x, c.z - z) > c.r)) return [x, z];
+    if (colliders.every(c => Math.hypot(c.x - x, c.z - z) > c.r + 1.4) && avoid.every(c => Math.hypot(c.x - x, c.z - z) > c.r) && !isCutOff(x, z) && !nearStream(x, z, 3)) return [x, z];
   }
 };
 
@@ -838,11 +872,65 @@ function updateGrove(dt, t) {
   grove.inside = nowIn;
 }
 
+// ---------- the stream: solid water that cuts the Crystal Grove off from the rest of the island ----------
+const stream = { uTime: { value: 0 }, mist: [], warned: false };
+{
+  // a flat ribbon of animated water that follows the channel; past the island's rim it curves down like a waterfall
+  const pts = STREAM_PTS.filter(p => Math.hypot(p.x, p.z) < WORLD_R + 3);
+  const pos = [], uv = [], idx = [];
+  let len = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)], tx = b.x - a.x, tz = b.z - a.z, tl = Math.hypot(tx, tz) || 1, nx = -tz / tl, nz = tx / tl;
+    if (i > 0) len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+    const r = Math.hypot(pts[i].x, pts[i].z), over = Math.max(0, r - (WORLD_R - 1)), y = -0.3 - over * over * 0.7, w = 2.5 * (1 + 0.1 * Math.sin(i * 0.7));
+    pos.push(pts[i].x + nx * w, y, pts[i].z + nz * w, pts[i].x - nx * w, y, pts[i].z - nz * w);
+    uv.push(0, len / 4, 1, len / 4);
+    if (i < pts.length - 1) { const k = i * 2; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx);
+  const water = new THREE.ShaderMaterial({
+    uniforms: { uTime: stream.uTime }, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `varying vec2 vUv; uniform float uTime;
+      void main() {
+        float edge = smoothstep(0.0, 0.2, vUv.x) * smoothstep(1.0, 0.8, vUv.x);                     // 0 at the banks, 1 mid-stream
+        float f1 = sin(vUv.y * 3.0 - uTime * 1.3 + sin(vUv.x * 6.0 + uTime * 0.7) * 1.5) * 0.5 + 0.5;
+        float f2 = sin(vUv.y * 7.0 - uTime * 2.2 + vUv.x * 9.0) * 0.5 + 0.5;
+        vec3 col = mix(vec3(0.10, 0.27, 0.36), vec3(0.03, 0.09, 0.18), edge * 0.8);
+        col += vec3(0.22, 0.38, 0.52) * pow(f1 * f2, 3.0) * 0.8;                                    // moonlit ripples
+        col += vec3(0.6, 0.75, 0.82) * (1.0 - edge) * (0.3 + 0.7 * f2) * 0.5;                       // foam along the banks
+        gl_FragColor = vec4(col, 0.92);
+      }`,
+  });
+  const mesh = new THREE.Mesh(g, water); mesh.renderOrder = 1; scene.add(mesh);
+  // thin mist hanging over the water
+  for (let i = 6; i < pts.length - 6; i += 14) {
+    if (Math.hypot(pts[i].x, pts[i].z) > WORLD_R - 4) continue;
+    const m = new THREE.Mesh(new THREE.CircleGeometry(3.6, 16), new THREE.MeshBasicMaterial({ color: 0x9fb0c8, transparent: true, opacity: 0.08, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2; m.position.set(pts[i].x, 0.4, pts[i].z); m.userData = { x: pts[i].x, z: pts[i].z, ph: rnd() * 6 }; scene.add(m); stream.mist.push(m);
+  }
+  // scenery on the far bank so the cut-off side is not an empty void
+  let placed = 0, tries = 0;
+  while (placed < 28 && tries++ < 400) {
+    const z = rr(-44, 44), x = streamXAt(z) - rr(5, 26);
+    if (Math.hypot(x, z) > WORLD_R - 3 || Math.hypot(x - GROVE.x, z - GROVE.z) < GROVE.r - 1 || nearStream(x, z, 4)) continue;
+    if (colliders.every(c => Math.hypot(c.x - x, c.z - z) > c.r + 1.4)) { place(deadTree(), x, z, 0.45); placed++; }
+  }
+}
+function updateStream(dt, t) {
+  stream.uTime.value = t;
+  for (const m of stream.mist) { const u = m.userData; m.position.x = u.x + Math.sin(t * 0.15 + u.ph) * 1.2; m.position.z = u.z + Math.cos(t * 0.11 + u.ph) * 1.0; m.material.opacity = 0.07 + Math.sin(t * 0.3 + u.ph) * 0.025; }
+  if (world !== 'outside' || stream.warned) return;
+  const n = streamNearest(pPos.x, pPos.y);
+  if (n && n.d < STREAM_HW + 1.1) { stream.warned = true; toast('The water is too wide and cold to cross...'); }
+}
+
 // graveyard patch near the middle-ish, trees around, pumpkins scattered
 for (let i = 0; i < 16; i++) { // tombstones in a cluster
   const a = rnd() * 6.28, d = Math.sqrt(rr(16, 90));
   const x = -9 + Math.cos(a) * d, z = -8 + Math.sin(a) * d;
-  if (Math.hypot(x, z) > 5 && Math.hypot(x, z) < WALK_R - 2 && colliders.every(c => Math.hypot(c.x - x, c.z - z) > 1.6))
+  if (Math.hypot(x, z) > 5 && Math.hypot(x, z) < WALK_R - 2 && !isCutOff(x, z) && !nearStream(x, z, 2.5) && colliders.every(c => Math.hypot(c.x - x, c.z - z) > 1.6))
     place(tombstone(), x, z, 0.6);
 }
 for (let i = 0; i < 75; i++) { const [x, z] = spot(5, WORLD_R - 2); place(deadTree(), x, z, 0.45); }
@@ -1508,6 +1596,7 @@ function updateCombat(dt, t) {
     for (const o of enemies) { if (o === e || o.state === 'dead') continue; const ox = e.x - o.x, oz = e.z - o.z, od = Math.hypot(ox, oz); if (od < 0.9 && od > 0.001) { e.x += ox / od * (0.9 - od) * 0.5; e.z += oz / od * (0.9 - od) * 0.5; } }
     if (dist < 0.8 && dist > 0.001) { const push = (0.8 - dist) * 0.5; pPos.x += dx / dist * push; pPos.y += dz / dist * push; e.x -= dx / dist * push; e.z -= dz / dist * push; }
     for (const c of colliders) pushOut(e, c, 0.4);
+    { const q = streamPush(e.x, e.z, 0.4); e.x = q[0]; e.z = q[1]; }
     const rr_ = Math.hypot(e.x, e.z); if (rr_ > WALK_R) { e.x *= WALK_R / rr_; e.z *= WALK_R / rr_; }
     // visuals
     const g = e.g;
@@ -1768,6 +1857,7 @@ function updateBunnies(dt, t) {
       else bunnyHop(b, -px + rr(-0.5, 0.5) * pd * 0.2, -pz + rr(-0.5, 0.5) * pd * 0.2, rr(1.5, 2.2), 0.27, 0.34);
     }
     for (const c of colliders) pushOut(b, c, 0.25);
+    { const q = streamPush(b.x, b.z, 0.25); b.x = q[0]; b.z = q[1]; }
     const r = Math.hypot(b.x, b.z); if (r > WALK_R) { b.x *= WALK_R / r; b.z *= WALK_R / r; }
     // pose
     const g = b.g, u = b.hop ? b.hop.t / b.hop.dur : 0;
@@ -1969,6 +2059,14 @@ function initAudio() {
   const cf = ctx.createBiquadFilter(); cf.type = 'lowpass'; cf.frequency.value = 1800; cf.connect(L.crystal);
   const ctrem = ctx.createGain(); ctrem.gain.value = 0.6; ctrem.connect(cf); lfoTo(0.35, 0.3, ctrem.gain);
   for (const f of [659.25, 661, 987.77]) { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; const g = ctx.createGain(); g.gain.value = 0.33; o.connect(g); g.connect(ctrem); o.start(); }
+  // stream: a gentle babble made of two moving noise bands
+  L.stream = mk();
+  const sns = ctx.createBufferSource(); sns.buffer = nb; sns.loop = true;
+  const sb1 = ctx.createBiquadFilter(); sb1.type = 'bandpass'; sb1.frequency.value = 900; sb1.Q.value = 1.1;
+  const sb2 = ctx.createBiquadFilter(); sb2.type = 'bandpass'; sb2.frequency.value = 2300; sb2.Q.value = 2;
+  const sg2 = ctx.createGain(); sg2.gain.value = 0.35;
+  lfoTo(0.6, 350, sb1.frequency); lfoTo(1.1, 700, sb2.frequency); lfoTo(0.35, 0.2, sg2.gain);
+  sns.connect(sb1); sb1.connect(L.stream); sns.connect(sb2); sb2.connect(sg2); sg2.connect(L.stream); sns.start(0, 0.9);
   // music-box bells bus
   L.bell = mk(); L.bell.connect(rev);
   audio.mood = ''; audio.t.chord = 0;
@@ -2074,6 +2172,8 @@ function updateAudio(dt) {
   set(L.wind, house ? 0.04 : inH ? 0.3 : 0.4);
   let gd = 99; if (out) for (const g of ghosts) gd = Math.min(gd, Math.hypot(g.position.x - pPos.x, g.position.z - pPos.y));
   set(L.ghost, out ? Math.max(0, 1 - gd / 9) * 0.12 : 0, 0.3);
+  const snr = out ? streamNearest(pPos.x, pPos.y) : null, sdist = snr ? snr.d - 2.5 : 99;
+  set(L.stream, Math.pow(Math.max(0, 1 - sdist / 14), 1.5) * 0.13, 0.3);
   const dgr = out ? Math.hypot(GROVE.x - pPos.x, GROVE.z - pPos.y) : 99;
   set(L.crystal, Math.pow(Math.max(0, 1 - dgr / 22), 1.5) * 0.08, 0.4);
   if (dgr < 16) { // glassy chimes that get louder the closer you are
@@ -2147,7 +2247,7 @@ function updateLightPool(dt) {
 }
 initLightPool();
 
-window.__spookie = { renderer, camera, scene, lightPool, lightSrc, GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+window.__spookie = { streamNearest, streamPush, isCutOff, STREAM_HW, STREAM_PTS, renderer, camera, scene, lightPool, lightSrc, GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -2202,6 +2302,7 @@ function tick() {
     const dx = pPos.x - c.x, dz = pPos.y - c.z, min = c.r + 0.35, dist = Math.hypot(dx, dz);
     if (dist < min && dist > 0.0001) { pPos.x = c.x + dx / dist * min; pPos.y = c.z + dz / dist * min; }
   }
+  if (world === 'outside') { const q = streamPush(pPos.x, pPos.y, 0.38); pPos.x = q[0]; pPos.y = q[1]; } // the water is solid
   if (world === 'house') {
     pPos.x = Math.min(HOUSE_BOUNDS.x1, Math.max(HOUSE_BOUNDS.x0, pPos.x));
     pPos.y = Math.min(HOUSE_BOUNDS.z1, Math.max(HOUSE_BOUNDS.z0, pPos.y));
@@ -2253,6 +2354,7 @@ function tick() {
   updateFarm(dt, t);
   updateVigil(dt);
   updateGrove(dt, t);
+  updateStream(dt, t);
   updateLightPool(dt);
   updateSpell(dt, t);
   updateAudio(dt);
