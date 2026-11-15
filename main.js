@@ -1361,9 +1361,9 @@ function updateBunnies(dt, t) {
 
 // ---------- crows: perch on dead trees, fly off when you come close, glide back later ----------
 const crows = [];
-const CROW_SCARE_R = 5.5;
+const CROW_SCARE_R = 3.4;
 function makeCrow() {
-  const g = new THREE.Group(), feather = mat(0x18141f, { emissive: 0x2a2040, emissiveIntensity: 0.5 }), beakM = mat(0x4a4650);
+  const g = new THREE.Group(), feather = mat(0x3a3450, { emissive: 0x5a4a90, emissiveIntensity: 0.9 }), beakM = mat(0x8a8494);
   const red = new THREE.MeshBasicMaterial({ color: 0xff3030 });
   const body = new THREE.Mesh(new THREE.SphereGeometry(0.17, 6, 5), feather); body.scale.set(0.9, 0.85, 1.5); body.position.y = 0.18; g.add(body);
   const head = new THREE.Group(); head.position.set(0, 0.3, 0.2); g.add(head);
@@ -1402,7 +1402,7 @@ function updateCrows(dt, t) {
     const px = pPos.x - c.x, pz = pPos.y - c.z, pd = Math.hypot(px, pz), g = c.g;
     c.t += dt;
     if (c.state === 'perch') {
-      const scared = pd < CROW_SCARE_R || (spell.t >= 0 && Math.hypot(c.x - spell.x, c.z - spell.z) < 8) || (combat.atkT > 0 && pd < 7);
+      const scared = pd < CROW_SCARE_R || (spell.t >= 0 && Math.hypot(c.x - spell.x, c.z - spell.z) < 8) || (combat.atkT > 0 && pd < 5);
       if (scared) { // burst into flight, away from the threat
         const d = pd || 1, a = Math.atan2(-pz, -px) + rr(-0.5, 0.5);
         c.state = 'flee'; c.t = 0; c.vx = Math.cos(a) * 6.5; c.vz = Math.sin(a) * 6.5; c.tree = null; c.face = Math.atan2(c.vx, c.vz);
