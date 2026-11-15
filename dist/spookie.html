@@ -74,7 +74,7 @@
   #sound.muted::after { content: ""; position: absolute; left: 20%; right: 20%; top: 50%; height: 2px; background: #ff5a6a; transform: rotate(-40deg); }
   #inv { position: fixed; top: calc(max(14px, env(safe-area-inset-top)) + 76px); right: max(14px, env(safe-area-inset-right)); display: none; pointer-events: none; font-size: 12px; text-align: right; color: #d8d0f0; }
   #inv .it { margin-top: 3px; padding: 3px 8px; background: rgba(10,7,20,.6); border-right: 3px solid #888; }
-  #inv b { color: #ffd9a8; } #inv .logs { border-color: #b07a3a; } #inv .planks { border-color: #e0c080; } #inv .iron { border-color: #c8663a; } #inv .nails { border-color: #aab2c5; }
+  #inv b { color: #ffd9a8; } #inv .logs { border-color: #b07a3a; } #inv .planks { border-color: #e0c080; } #inv .iron { border-color: #c8663a; } #inv .nails { border-color: #aab2c5; } #inv .shards { border-color: #35e0ff; }
   #craft { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(340px, calc(100vw - 32px)); box-sizing: border-box; display: none; padding: 14px; background: rgba(10,7,20,.96); border: 2px solid #ff9a3c; color: #e6e0f7; box-shadow: 0 0 22px rgba(255,106,0,.35); }
   #craft.on { display: block; }
   #ctitle { color: #ff9a3c; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
@@ -53206,6 +53206,7 @@ function streamNearest(x, z) { // nearest point on the stream's centre line (nul
 }
 function streamPush(x, z, r) { // push a body of radius r out of the water; returns a shared [x, z]
   _sp[0] = x; _sp[1] = z;
+  if (BRIDGE.open && x > BRIDGE.x0 && x < BRIDGE.x1 && Math.abs(z - BRIDGE.z) <= BRIDGE.hw) return _sp; // on the bridge: the water does not push you
   const n = streamNearest(x, z);
   if (n && n.d < STREAM_HW + r) { const k = (STREAM_HW + r) / (n.d || 0.0001); _sp[0] = n.cx + (x - n.cx) * k; _sp[1] = n.cz + (z - n.cz) * k; }
   return _sp;
@@ -53216,6 +53217,13 @@ function streamXAt(z) { // x of the stream's centre line at this z (it always ru
   return z < STREAM_PTS[0].z ? STREAM_PTS[0].x : STREAM_PTS[STREAM_PTS.length - 1].x;
 }
 const isCutOff = (x, z) => x < streamXAt(z); // on the far (west) side of the water, where nothing the player must reach may spawn
+// The bridge crosses the stream due west of the graveyard, straight toward the Crystal Grove. It exists once the quest is finished.
+const BRIDGE = (() => { const z = -8, cx = streamXAt(z); return { z, cx, x0: cx - 4.9, x1: cx + 4.9, hw: 1.3, y: 0.22, open: false }; })();
+function groundY(x, z) { // the height to stand at: the deck while crossing the bridge, otherwise the terrain
+  const h = heightAt(x, z);
+  if (!BRIDGE.open || Math.abs(z - BRIDGE.z) > BRIDGE.hw + 0.3 || x < BRIDGE.x0 || x > BRIDGE.x1) return h;
+  return h + (BRIDGE.y - h) * smooth(0, 1.2, Math.min(x - BRIDGE.x0, BRIDGE.x1 - x));
+}
 const HOUSE = { x: -11, z: 10, hw: 3, hd: 2.5 }; // blacksmith house (door faces +z)
 
 // gentle rolling hills
@@ -53981,7 +53989,7 @@ function updateFarm(dt, t) {
 
 // ---------- the Crystal Grove: sharp glowing crystals that light up their surroundings ----------
 avoid.push({ x: GROVE.x, z: GROVE.z, r: GROVE.r + 1.5 });
-const grove = { mats: [], decals: [], sparks: [], inside: false };
+const grove = { mats: [], decals: [], sparks: [], clusters: [], inside: false };
 {
   // a faceted, pointed crystal: a 6-sided lathe with a sharp tip
   const crystalG = new THREE.LatheGeometry([new THREE.Vector2(0, 0), new THREE.Vector2(0.32, 0.3), new THREE.Vector2(0.27, 1.0), new THREE.Vector2(0, 1.7)], 6);
@@ -54007,9 +54015,9 @@ const grove = { mats: [], decals: [], sparks: [], inside: false };
       m.rotation.set(Math.sin(a) * tilt, rnd() * 3, -Math.cos(a) * tilt); grp.add(m);
     }
     grp.position.set(cl.x, y0, cl.z); scene.add(grp);
-    colliders.push({ x: cl.x, z: cl.z, r: 0.5 + 0.18 * cl.h });
+    const colObj = { x: cl.x, z: cl.z, r: 0.5 + 0.18 * cl.h }; colliders.push(colObj); grp.userData.collider = colObj;
     const sz = 5.5 + cl.h * 1.8, decal = new THREE.Mesh(decalG, grove.decals[cl.ci]);
-    decal.scale.set(sz, sz, 1); decal.rotation.x = -Math.PI / 2; decal.position.set(cl.x, y0 + 0.07, cl.z); decal.renderOrder = 2; scene.add(decal);
+    decal.scale.set(sz, sz, 1); decal.rotation.x = -Math.PI / 2; decal.position.set(cl.x, y0 + 0.07, cl.z); decal.renderOrder = 2; scene.add(decal); grove.clusters.push({ grp, decal, ci: cl.ci });
     if (biggest.includes(cl)) { // a few clusters also cast real coloured light on the player and nearby objects
       const l = new THREE.PointLight(CRYSTAL_COLS[cl.ci], 9, 12, 1.6); l.position.set(cl.x, y0 + cl.h * 0.6, cl.z); l.userData.base = 9; flickers.push(l); scene.add(l);
     }
@@ -54086,13 +54094,13 @@ const stream = { uTime: { value: 0 }, mist: [], warned: false };
 function updateStream(dt, t) {
   stream.uTime.value = t;
   for (const m of stream.mist) { const u = m.userData; m.position.x = u.x + Math.sin(t * 0.15 + u.ph) * 1.2; m.position.z = u.z + Math.cos(t * 0.11 + u.ph) * 1.0; m.material.opacity = 0.07 + Math.sin(t * 0.3 + u.ph) * 0.025; }
-  if (world !== 'outside' || stream.warned) return;
+  if (world !== 'outside' || stream.warned || BRIDGE.open) return;
   const n = streamNearest(pPos.x, pPos.y);
   if (n && n.d < STREAM_HW + 1.1) { stream.warned = true; toast('The water is too wide and cold to cross...'); }
 }
 
 // ---------- the sawmill (south): broken at first; Bram the sawyer asks you to get it running again ----------
-const inv = { logs: 0, planks: 0, iron: 0, nails: 0, seen: {} };
+const inv = { logs: 0, planks: 0, iron: 0, nails: 0, shards: 0, owned: {}, seen: {} };
 const SAW = {
   title: 'The Silent Sawmill', state: 'none', need: 6,   // none -> wood -> ready -> repair -> done
   dialogue: {
@@ -54116,9 +54124,22 @@ const SAW = {
     ],
   },
 };
+const BR = {
+  title: 'Across the Water', state: 'none', planks: 10, nails: 16,   // none -> gather -> done (given by Old Marrow once his first quest is done)
+  dialogue: {
+    none: [
+      'You brought them back, traveller... I owe you a tale.',
+      'Far to the west, past the old graveyard, there is a stream. And beyond it, a grove of crystal that sings in the dark. You can hear it on still nights.',
+      'No one has crossed since the old bridge burned. Ten planks and sixteen nails would build a new one.',
+      'Bram the sawyer cuts the planks. Hob the smith makes the nails from iron. Bring it all to the bank, and build.',
+    ],
+    gather: () => [`Ten planks and sixteen nails, traveller. You carry ${Math.min(inv.planks, BR.planks)} planks and ${Math.min(inv.nails, BR.nails)} nails.`, 'The crossing is on the east bank, west of the graveyard. Look for the stakes with orange rags.'],
+    done: ['The bridge stands again. I can hear the grove singing louder now...', 'Take care among the crystals. They cut sharper than any sword, and Hob can forge shards into something fine.'],
+  },
+};
 const sawmill = { blade: null, carriage: null, lever: null, light: null, running: false, dustT: 0 };
 const sawyer = { group: null, marker: null };
-avoid.push({ x: SAWMILL.x, z: SAWMILL.z, r: 8 });
+avoid.push({ x: SAWMILL.x, z: SAWMILL.z, r: 8 }, { x: BRIDGE.cx + 6, z: BRIDGE.z, r: 3.5 }, { x: BRIDGE.cx - 6, z: BRIDGE.z, r: 3.5 }); // keep both ends of the bridge clear
 {
   const shed = new THREE.Group(), plank = mat(0xb89a68), dark = mat(0x2d2530);
   box(7.6, 0.06, 5.6, woodMid, 0, 0.03, 0, shed);                                   // floor
@@ -54501,6 +54522,7 @@ function renderQuestHud() {
     : SQ.state === 'ready' ? 'Return to Hob in the smithy' : 'Complete'));
   if (SAW.state !== 'none') parts.push(`<b>${SAW.title}</b><br>` + (SAW.state === 'wood' ? `Chop logs from dead trees <span>${Math.min(inv.logs, SAW.need)}/${SAW.need}</span>`
     : SAW.state === 'ready' ? 'Bring the logs to Bram' : SAW.state === 'repair' ? 'Pull the lever on the saw bench' : 'Complete'));
+  if (BR.state !== 'none') parts.push(`<b>${BR.title}</b><br>` + (BR.state === 'gather' ? `Build the bridge: planks <span>${Math.min(inv.planks, BR.planks)}/${BR.planks}</span>, nails <span>${Math.min(inv.nails, BR.nails)}/${BR.nails}</span>` : 'Complete'));
   if (NIGHT.state !== 'none') parts.push(`<b>${NIGHT.title}</b><br>` + (NIGHT.state === 'relight' ? 'Relight the scarecrow in the field'
     : NIGHT.state === 'vigil' ? `Defend the field <span>wave ${Math.max(1, NIGHT.wave)}/${NIGHT.waves.length}</span> &middot; wheat <span>${Math.round(NIGHT.wheat * 100)}%</span>`
     : NIGHT.state === 'ready' ? 'Return to Farmer Oda' : 'Complete'));
@@ -54519,6 +54541,11 @@ function openDialog(name, ls, end, npc) {
   ui.dtext.textContent = '';
 }
 function talkToMarrow() {
+  if (QUEST.state === 'done') { // once the souls are saved, Marrow tells of the grove and gives the bridge quest
+    const bs = BR.state, bd = BR.dialogue[bs];
+    openDialog(QUEST.giver.name, typeof bd === 'function' ? bd() : bd, () => { if (bs === 'none') { BR.state = 'gather'; toast('Quest started: Across the Water'); } renderQuestHud(); }, QUEST.giver.npc);
+    return;
+  }
   const s = QUEST.state, d = QUEST.dialogue[s];
   openDialog(QUEST.giver.name, typeof d === 'function' ? d() : d, () => {
     if (s === 'none') {
@@ -54586,7 +54613,7 @@ ui.dialog.addEventListener('click', interact);
 function updateQuests(dt, t) {
   const npc = QUEST.giver.npc;
   // marker visible when the giver has something new to say
-  marker.visible = QUEST.state === 'none' || QUEST.state === 'ready';
+  marker.visible = QUEST.state === 'none' || QUEST.state === 'ready' || (QUEST.state === 'done' && BR.state === 'none');
   marker.position.y = 2.1 + Math.sin(t * 3) * 0.1; marker.rotation.y = t * 2;
   smithMarker.visible = SQ.state === 'none' || SQ.state === 'ready';
   smithMarker.position.y = 2.3 + Math.sin(t * 3) * 0.1; smithMarker.rotation.y = t * 2;
@@ -54611,7 +54638,7 @@ function updateQuests(dt, t) {
   }
   const it = !talking && !transitioning && !crafting ? currentInteractable() : null;
   ui.talk.classList.toggle('on', !!it);
-  if (it) ui.talk.textContent = it.label;
+  if (it) ui.talk.textContent = typeof it.label === 'function' ? it.label() : it.label;
 
   // souls: float, collect, orbit fire when done
   let nearest = null, nd = 1e9;
@@ -54662,6 +54689,7 @@ function updateQuests(dt, t) {
   if (NIGHT.state === 'ready') cands.push([FARMER_POS.x, FARMER_POS.z]);
   if (SAW.state === 'ready') cands.push([sawyer.group.position.x, sawyer.group.position.z]);
   if (SAW.state === 'repair') cands.push([SAWMILL.x + 3.0, SAWMILL.z + 1.0]);
+  if (BR.state === 'gather' && inv.planks >= BR.planks && inv.nails >= BR.nails) cands.push([BRIDGE.x1 + 1, BRIDGE.z]);
   let target = null, bestD = 1e9;
   for (const c of cands) { const d = Math.hypot(c[0] - pPos.x, c[1] - pPos.y); if (d < bestD) { bestD = d; target = c; } }
   if (target && !talking && world === 'outside') {
@@ -54674,7 +54702,7 @@ function updateQuests(dt, t) {
 }
 
 // ---------- combat ----------
-let HP_MAX = 5;
+let HP_MAX = 5, SWORD_DMG = 1;
 const combat = { hp: HP_MAX, inv: 0, atkT: 0, cd: 0, hit: false, inside: false, dead: false };
 const pk = new THREE.Vector2(); // player knockback velocity
 const enemies = [], pickups = [], fxPool = [];
@@ -54683,12 +54711,13 @@ function renderHearts() { heartsEl.innerHTML = Array.from({ length: HP_MAX }, (_
 renderHearts();
 
 // the player's sword (left hand) and its slash arc
+let swordBladeMat;
 const swordPivot = new THREE.Group();
 swordPivot.position.set(-0.34, 0.95, 0.2);
 swordPivot.rotation.set(0.55, -0.25, 0);
 body.add(swordPivot);
 {
-  const blade = mat(0xdfe6f5, { metalness: 0.3, roughness: 0.4, emissive: 0x223355, emissiveIntensity: 0.5 });
+  const blade = swordBladeMat = mat(0xdfe6f5, { metalness: 0.3, roughness: 0.4, emissive: 0x223355, emissiveIntensity: 0.5 });
   box(0.07, 0.05, 0.95, blade, 0, 0, 0.8, swordPivot);
   box(0.32, 0.06, 0.09, metal, 0, 0, 0.3, swordPivot);
   cyl(0.03, 0.03, 0.28, 5, woodDark, 0, 0, 0.15, swordPivot).rotation.x = Math.PI / 2;
@@ -54766,7 +54795,7 @@ function applyHits() {
   for (const e of enemies) {
     if (e.state === 'dead') continue;
     const dx = e.x - pPos.x, dz = e.z - pPos.y, d = Math.hypot(dx, dz);
-    if (d < 2.3 && (dx * fx_ + dz * fz_) / (d || 1) > 0.2) damageEnemy(e, 1, dx, dz);
+    if (d < 2.3 && (dx * fx_ + dz * fz_) / (d || 1) > 0.2) damageEnemy(e, SWORD_DMG, dx, dz);
   }
   hitNodes(fx_, fz_);
 }
@@ -54911,7 +54940,7 @@ function updateCombat(dt, t) {
     const rr_ = Math.hypot(e.x, e.z); if (rr_ > WALK_R) { e.x *= WALK_R / rr_; e.z *= WALK_R / rr_; }
     // visuals
     const g = e.g;
-    g.position.set(e.x, heightAt(e.x, e.z) + (e.moving ? Math.abs(Math.sin(e.t * 9 + e.ph)) * 0.08 : 0), e.z);
+    g.position.set(e.x, groundY(e.x, e.z) + (e.moving ? Math.abs(Math.sin(e.t * 9 + e.ph)) * 0.08 : 0), e.z);
     const dr = Math.atan2(Math.sin(e.face - g.rotation.y), Math.cos(e.face - g.rotation.y));
     g.rotation.y += dr * Math.min(1, dt * 10);
     e.arm.rotation.x += (armT - e.arm.rotation.x) * Math.min(1, dt * 18);
@@ -55111,7 +55140,7 @@ interactables.push(
 renderQuestHud();
 
 // ---------- gathering and crafting: chop dead trees for logs, mine iron veins, a tiny crafting window ----------
-const NAMES = { logs: ['Log', 'Logs'], planks: ['Plank', 'Planks'], iron: ['Iron', 'Iron'], nails: ['Nail', 'Nails'] };
+const NAMES = { logs: ['Log', 'Logs'], planks: ['Plank', 'Planks'], iron: ['Iron', 'Iron'], nails: ['Nail', 'Nails'], shards: ['Shard', 'Shards'] };
 const resources = { hinted: false };
 const invEl = $('inv');
 function renderInv() {
@@ -55128,6 +55157,7 @@ function makeNode(obj, kind, hp) {
   nodes.push(n); return n;
 }
 treeObjs.forEach(t => makeNode(t, 'tree', 3));
+grove.clusters.forEach(c => { makeNode(c.grp, 'crystal', 3).extra = c; }); // each crystal cluster can be mined for shards once the bridge is built
 function makeVein() {
   const g = new THREE.Group(), rockM = mat(0x4a4650), glintM = new THREE.MeshBasicMaterial({ color: 0xff8a3c });
   for (let i = 0; i < 3; i++) {
@@ -55149,6 +55179,7 @@ function scareCrowsOff(tree) { // a crow cannot stay on a tree that is being fel
 function breakNode(n) {
   if (n.obj.userData.collider) n.obj.userData.collider.r = -5; // nothing blocks the spot any more
   if (n.kind === 'tree') { n.state = 'falling'; n.t = 0; scareCrowsOff(n.obj); addItem('logs', 2); toast('+2 Logs'); sfx.fell(); }
+  else if (n.kind === 'crystal') { n.state = 'gone'; n.rt = 180; n.obj.visible = false; n.extra.decal.visible = false; addItem('shards', 2); toast('+2 Shards'); sfx.glint(); }
   else { n.state = 'gone'; n.rt = 120; n.obj.visible = false; addItem('iron', 1); toast('+1 Iron'); sfx.ore(); }
 }
 function hitNodes(fx_, fz_) { // called from the sword swing
@@ -55158,7 +55189,8 @@ function hitNodes(fx_, fz_) { // called from the sword swing
     if (d > 2.5 || (dx * fx_ + dz * fz_) / (d || 1) < 0.15) continue;
     if (n.kind === 'iron' && SQ.state !== 'done') { if (!resources.hinted) { resources.hinted = true; toast('Rust-veined rock... Hob might know what to do with iron.'); } continue; }
     n.hp--; n.shake = 0.3; n.dirx = dx / (d || 1); n.dirz = dz / (d || 1);
-    sfx.chop(); spawnFx(n.x - n.dirx * 0.5, 1.0, n.z - n.dirz * 0.5, n.kind === 'tree' ? 0x8a6a44 : 0xb5532a, 4);
+    if (n.kind === 'crystal') sfx.chip(); else sfx.chop();
+    spawnFx(n.x - n.dirx * 0.5, 1.0, n.z - n.dirz * 0.5, n.kind === 'tree' ? 0x8a6a44 : n.kind === 'crystal' ? CRYSTAL_COLS[n.extra.ci] : 0xb5532a, 4);
     if (n.hp <= 0) breakNode(n);
   }
 }
@@ -55171,7 +55203,7 @@ function updateNodes(dt) {
         n.shake -= dt;
         if (n.kind === 'tree') { o.quaternion.copy(n.q0); o.rotateOnWorldAxis(_axis.set(n.dirz, 0, -n.dirx), Math.sin(n.shake * 50) * 0.05 * Math.max(0, n.shake / 0.3)); }
         else o.scale.setScalar(n.s0 * (1 + Math.sin(n.shake * 50) * 0.06));
-        if (n.shake <= 0) { o.quaternion.copy(n.q0); o.scale.setScalar(n.kind === 'iron' ? n.s0 * (0.4 + 0.6 * n.hp / n.maxHp) : n.s0); } // veins shrink with every hit
+        if (n.shake <= 0) { o.quaternion.copy(n.q0); o.scale.setScalar(n.kind !== 'tree' ? n.s0 * (0.4 + 0.6 * n.hp / n.maxHp) : n.s0); } // veins shrink with every hit
       }
     } else if (n.state === 'falling') {
       n.t += dt; const p = Math.min(1, n.t / 0.8);
@@ -55179,7 +55211,7 @@ function updateNodes(dt) {
       if (p >= 1) { o.visible = false; n.state = 'gone'; n.rt = 90; }
     } else if (n.state === 'gone') {
       n.rt -= dt;
-      if (n.rt <= 0 && Math.hypot(n.x - pPos.x, n.z - pPos.y) > 10) { o.visible = true; o.quaternion.copy(n.q0); n.hp = n.maxHp; n.state = 'grow'; n.t = 0; o.scale.setScalar(n.s0 * 0.15); }
+      if (n.rt <= 0 && Math.hypot(n.x - pPos.x, n.z - pPos.y) > 10) { o.visible = true; if (n.extra) n.extra.decal.visible = true; o.quaternion.copy(n.q0); n.hp = n.maxHp; n.state = 'grow'; n.t = 0; o.scale.setScalar(n.s0 * 0.15); }
     } else if (n.state === 'grow') {
       n.t += dt; const s = Math.min(1, n.t / 1.2); o.scale.setScalar(n.s0 * (0.15 + 0.85 * s));
       if (s >= 1) { n.state = 'ok'; if (o.userData.collider) o.userData.collider.r = n.cr; }
@@ -55191,14 +55223,18 @@ function updateNodes(dt) {
 const craftEl = $('craft'), ctitle = $('ctitle'), clist = $('clist');
 const RECIPES = {
   mill: { title: 'Sawmill', rows: [{ gain: { planks: 2 }, cost: { logs: 1 } }] },
-  anvil: { title: 'Anvil', rows: [{ gain: { nails: 4 }, cost: { iron: 1 } }] },
+  anvil: { title: 'Anvil', rows: [
+    { gain: { nails: 4 }, cost: { iron: 1 } },
+    { name: 'Crystal Lantern', note: 'a brighter lantern that reaches farther', cost: { shards: 6, iron: 2 }, once: 'lantern', apply: () => { lantern.userData.base = 10; lantern.distance = 30; } },
+    { name: 'Crystal Edge', note: 'the sword hits for double damage', cost: { shards: 8, nails: 4 }, once: 'sword', apply: () => { SWORD_DMG = 2; slash.material.color.setHex(0x7ff4ff); swordBladeMat.emissive.setHex(0x35e0ff); swordBladeMat.emissiveIntensity = 1.4; } },
+  ] },
 };
 const fmt = o => Object.entries(o).map(([k, v]) => `${v} ${NAMES[k][v === 1 ? 0 : 1]}`).join(' + ');
 let craftKind = null;
 function renderCraft() {
   clist.innerHTML = RECIPES[craftKind].rows.map((r, i) => {
-    const ok = Object.entries(r.cost).every(([k, v]) => inv[k] >= v);
-    return `<div class="row"><div><b>${fmt(r.gain)}</b><small>costs ${fmt(r.cost)}</small></div><button data-i="${i}" ${ok ? '' : 'disabled'}>Craft</button></div>`;
+    const owned = r.once && inv.owned[r.once], ok = !owned && Object.entries(r.cost).every(([k, v]) => inv[k] >= v);
+    return `<div class="row"><div><b>${r.name || fmt(r.gain)}</b><small>${owned ? 'already forged' : 'costs ' + fmt(r.cost) + (r.note ? ' &middot; ' + r.note : '')}</small></div><button data-i="${i}" ${ok ? '' : 'disabled'}>${owned ? 'Done' : 'Craft'}</button></div>`;
   }).join('');
 }
 function openCrafting(kind) { craftKind = kind; crafting = true; ctitle.textContent = RECIPES[kind].title; renderCraft(); craftEl.classList.add('on'); }
@@ -55207,11 +55243,71 @@ clist.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b || b.disabled) return;
   const r = RECIPES[craftKind].rows[+b.dataset.i];
   for (const [k, v] of Object.entries(r.cost)) inv[k] -= v;
-  for (const [k, v] of Object.entries(r.gain)) { inv[k] += v; inv.seen[k] = true; }
+  if (r.gain) for (const [k, v] of Object.entries(r.gain)) { inv[k] += v; inv.seen[k] = true; }
+  if (r.once) { inv.owned[r.once] = true; r.apply(); toast(r.name + ' forged!'); }
   sfx.craft(); renderInv(); renderQuestHud(); renderCraft();
 });
 $('cclose').addEventListener('click', closeCrafting);
 ['pointerdown', 'pointerup'].forEach(ev => craftEl.addEventListener(ev, e => e.stopPropagation()));
+
+// ---------- the bridge ("Across the Water"): built from planks and nails on the east bank, then anyone can cross ----------
+const bridge = { parts: [], shown: 0, building: false, t: 0, stakes: null, light: null };
+{
+  const g = new THREE.Group(), plankM = mat(0xb89a68), beamM = mat(0x5a3b24), lampM = new THREE.MeshBasicMaterial({ color: 0xffb060 });
+  const len = BRIDGE.x1 - BRIDGE.x0, cx = BRIDGE.cx, z0 = BRIDGE.z, y0 = BRIDGE.y;
+  const add = m => { m.visible = false; bridge.parts.push(m); g.add(m); return m; };
+  // stage 1: posts along both sides (they reach down into the stream bed)
+  const nPosts = 5;
+  for (let i = 0; i < nPosts; i++) for (const sd of [-1, 1]) {
+    const x = BRIDGE.x0 + 0.4 + i * (len - 0.8) / (nPosts - 1), post = add(box(0.22, 2.3, 0.22, beamM, x, 0.3, z0 + sd * 1.3, g)); post.rotation.z = rr(-0.03, 0.03);
+  }
+  // stage 2: two beams, then the deck planks one after another across the stream
+  for (const sd of [-1, 1]) add(box(len, 0.14, 0.16, beamM, cx, y0 - 0.12, z0 + sd * 1.0, g));
+  const nPl = Math.round(len / 0.5);
+  for (let i = 0; i < nPl; i++) add(box(0.46, 0.1, 2.7, plankM, BRIDGE.x0 + 0.25 + i * (len - 0.5) / (nPl - 1), y0 + rr(-0.01, 0.01), z0 + rr(-0.04, 0.04), g));
+  // stage 3: rails and two lanterns
+  for (const sd of [-1, 1]) { add(box(len, 0.08, 0.1, beamM, cx, y0 + 1.0, z0 + sd * 1.3, g)); add(box(len, 0.08, 0.1, beamM, cx, y0 + 0.5, z0 + sd * 1.3, g)); }
+  for (const x of [BRIDGE.x0 + 0.4, BRIDGE.x1 - 0.4]) add(box(0.22, 0.28, 0.22, lampM, x, 1.6, z0 + 1.3, g));
+  const bl = new THREE.PointLight(0xffb060, 5, 9, 1.5); bl.position.set(cx, 2.2, z0); bl.userData.base = 0; flickers.push(bl); g.add(bl); bridge.light = bl;
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  scene.add(g);
+  // survey stakes with orange rags mark the crossing until the building starts
+  const st = new THREE.Group(), rag = new THREE.MeshBasicMaterial({ color: 0xff7a22 });
+  for (const [x, zz] of [[BRIDGE.x1 + 0.6, z0 - 1.5], [BRIDGE.x1 + 0.6, z0 + 1.5], [BRIDGE.x0 - 0.6, z0 - 1.5], [BRIDGE.x0 - 0.6, z0 + 1.5]]) {
+    cyl(0.04, 0.05, 1.2, 5, woodDark, x, 0.6 + heightAt(x, zz), zz, st); box(0.3, 0.16, 0.03, rag, x + 0.15, 1.1 + heightAt(x, zz), zz, st);
+  }
+  box(1.1, 0.5, 0.06, woodDark, BRIDGE.x1 + 1.4, 1.0, z0, st); // a small sign on the near bank
+  scene.add(st); bridge.stakes = st;
+}
+const haveBridgeMaterials = () => inv.planks >= BR.planks && inv.nails >= BR.nails;
+function startBuild() {
+  inv.planks -= BR.planks; inv.nails -= BR.nails; renderInv(); renderQuestHud();
+  bridge.building = true; bridge.t = 0; bridge.shown = 0; bridge.stakes.visible = false; toast('Building the bridge...');
+}
+function finishBridge() {
+  bridge.building = false; BRIDGE.open = true; bridge.light.userData.base = 5;
+  const half = (BRIDGE.x1 - BRIDGE.x0) / 2 - 1.0; // rails only along the span over the water, so the banks stay open
+  for (const sd of [-1, 1]) colliders.push({ x: BRIDGE.cx, z: BRIDGE.z + sd * 1.35, hw: half, hd: 0.1, r: half });
+  BR.state = 'done'; renderQuestHud(); toast('Quest complete! The way west is open'); sfx.questDone();
+}
+function updateBridge(dt) {
+  if (!bridge.building) return;
+  bridge.t += dt * 9;
+  while (bridge.shown < Math.min(bridge.parts.length, Math.floor(bridge.t))) {
+    const m = bridge.parts[bridge.shown++]; m.visible = true;
+    if (bridge.shown % 2 === 0) { sfx.chop(); spawnFx(m.position.x, 0.6, m.position.z, 0xe0c080, 1); }
+  }
+  if (bridge.shown >= bridge.parts.length) finishBridge();
+}
+interactables.push({
+  world: 'outside', getPos: () => ({ x: BRIDGE.x1 + 1.0, z: BRIDGE.z }), r: 2.3,
+  label: () => (haveBridgeMaterials() ? 'BUILD BRIDGE' : 'BRIDGE SITE'),
+  enabled: () => BR.state === 'gather' && !bridge.building,
+  act: () => {
+    if (haveBridgeMaterials()) startBuild();
+    else openDialog('Bridge site', ['This is where the old bridge stood. The stream is far too wide and cold to cross.', `You need ${BR.planks} planks and ${BR.nails} nails to build a new one. You carry ${inv.planks} planks and ${inv.nails} nails.`], null, null);
+  },
+});
 
 // ---------- bunnies: nibble grass, hop around, scatter when you get close ----------
 const bunnies = [];
@@ -55275,7 +55371,7 @@ function updateBunnies(dt, t) {
     const r = Math.hypot(b.x, b.z); if (r > WALK_R) { b.x *= WALK_R / r; b.z *= WALK_R / r; }
     // pose
     const g = b.g, u = b.hop ? b.hop.t / b.hop.dur : 0;
-    g.position.set(b.x, heightAt(b.x, b.z) + b.y, b.z);
+    g.position.set(b.x, groundY(b.x, b.z) + b.y, b.z);
     g.rotation.y += Math.atan2(Math.sin(b.face - g.rotation.y), Math.cos(b.face - g.rotation.y)) * Math.min(1, dt * 14);
     g.rotation.x = b.hop ? (0.5 - u) * 0.7 : 0;
     g.scale.set(1, b.hop ? 1 + 0.12 * Math.sin(u * Math.PI) : 1, 1);
@@ -55533,6 +55629,7 @@ const sfxImpl = {
   fell() { tone(90, 0.5, 'sine', 0.25, 40); noise(0.5, 'bandpass', 500, 150, 0.2); },
   lever() { tone(120, 0.12, 'square', 0.2, 70); tone(80, 0.2, 'sawtooth', 0.15, 50, 0.1); },
   craft() { tone(880, 0.08, 'triangle', 0.2); tone(1318.5, 0.15, 'triangle', 0.18, null, 0.08); noise(0.04, 'highpass', 4000, null, 0.1); },
+  chip() { tone(1800, 0.06, 'triangle', 0.15, 1200); noise(0.05, 'highpass', 4500, null, 0.14); },
   hop(v = 0.06) { tone(150, 0.07, 'sine', v, 80); noise(0.04, 'lowpass', 500, null, v * 0.6); },
   hit() { noise(0.1, 'lowpass', 1600, null, 0.28); tone(150, 0.12, 'square', 0.16, 60); },
   skelDie() { for (let i = 0; i < 6; i++) noise(0.04, 'highpass', 1800 + Math.random() * 1500, null, 0.18, i * 0.045); tone(90, 0.3, 'sine', 0.2, 45, 0.05); },
@@ -55674,7 +55771,7 @@ function updateLightPool(dt) {
 }
 initLightPool();
 
-window.__spookie = { setSawmillRunning, inv, SAW, nodes, addItem, openCrafting, closeCrafting, setFacing: a => { facing = a; }, SAWMILL, sawyer, sawmill, streamNearest, streamPush, isCutOff, STREAM_HW, STREAM_PTS, renderer, camera, scene, lightPool, lightSrc, GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+window.__spookie = { colliders, SQ, BR, BRIDGE, bridge, groundY, startBuild, setSawmillRunning, inv, SAW, nodes, addItem, openCrafting, closeCrafting, setFacing: a => { facing = a; }, SAWMILL, sawyer, sawmill, streamNearest, streamPush, isCutOff, STREAM_HW, STREAM_PTS, renderer, camera, scene, lightPool, lightSrc, GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -55738,7 +55835,7 @@ function tick() {
     if (r > WALK_R) pPos.multiplyScalar(WALK_R / r);
   }
 
-  const gy = world === 'house' ? 0 : heightAt(pPos.x, pPos.y);
+  const gy = world === 'house' ? 0 : groundY(pPos.x, pPos.y);
   player.position.set(pPos.x, gy, pPos.y);
   body.rotation.y = facing;
   body.position.y = Math.abs(Math.sin(walkT)) * 0.12 * (mag > 0 ? 1 : 0);
@@ -55784,6 +55881,7 @@ function tick() {
   updateStream(dt, t);
   updateSawmill(dt, t);
   updateNodes(dt);
+  updateBridge(dt);
   updateLightPool(dt);
   updateSpell(dt, t);
   updateAudio(dt);
