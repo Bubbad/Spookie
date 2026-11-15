@@ -54687,7 +54687,7 @@ const novaTrail = new THREE.Mesh(new THREE.RingGeometry(0.88, 1, 72), novaMats.g
 const novaWash = new THREE.Mesh(new THREE.CircleGeometry(1, 48), novaMats.wash);
 for (const m of [novaCore, novaGlow, novaTrail, novaWash]) { m.rotation.x = -Math.PI / 2; nova.add(m); }
 novaWash.position.y = -0.02;
-const novaLight = new THREE.PointLight(0x9fd8ff, 0, 22, 1.4); novaLight.position.y = 1.6; nova.add(novaLight);
+const novaLight = new THREE.PointLight(0x9fd8ff, 0, 22, 1.4); scene.add(novaLight); // always in the scene (intensity 0 when idle) so the light count never changes
 const novaSparks = [];
 {
   const g = new THREE.OctahedronGeometry(0.09, 0);
@@ -54697,6 +54697,7 @@ function castSpell() {
   if (talking || transitioning || world !== 'outside' || combat.dead || spell.cd > 0 || spell.t >= 0) return;
   spell.cd = spell.cdMax; spell.t = 0; spell.x = pPos.x; spell.z = pPos.y; spell.hit.clear();
   nova.position.set(spell.x, heightAt(spell.x, spell.z) + 0.25, spell.z); nova.visible = true;
+  novaLight.position.set(spell.x, heightAt(spell.x, spell.z) + 1.8, spell.z);
   spawnFx(spell.x, 1, spell.z, 0xcdeaff, 8); sfx.nova();
 }
 spellBtn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); castSpell(); });
@@ -55255,7 +55256,47 @@ function updateAudio(dt) {
   }
 }
 
-window.__spookie = { GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+
+// ---------- light pooling ----------
+// Every real point light costs work for every lit pixel on screen, near or far. So only a small pool of real lights exists:
+// it is moved onto whichever light sources are closest to the player. The original lights stay in the scene, hidden, and keep
+// flickering and moving; the pool copies their position, colour and brightness, fading lights in and out so nothing pops.
+const LIGHT_POOL = 10;
+const lightSrc = [], lightPool = [];
+function initLightPool() {
+  scene.updateMatrixWorld(true);
+  scene.traverse(o => { if (o.isPointLight && o !== lantern && o !== novaLight) { lightSrc.push(o); o.visible = false; } });
+  for (let i = 0; i < LIGHT_POOL; i++) { const l = new THREE.PointLight(0xffffff, 0, 10, 1.5); l.userData = { src: null, fade: 0 }; scene.add(l); lightPool.push(l); }
+}
+function updateLightPool(dt) {
+  if (world !== 'outside') return;
+  const px = pPos.x, pz = pPos.y, cand = [];
+  for (const s of lightSrc) {
+    const e = s.matrixWorld.elements, d = Math.hypot(e[12] - px, e[14] - pz), range = s.distance || 10;
+    if (d < range * 1.6 + 6) cand.push([s, d / Math.max(4, range)]); // bigger lights matter from farther away
+  }
+  cand.sort((a, b) => a[1] - b[1]);
+  const want = new Set(cand.slice(0, LIGHT_POOL).map(c => c[0])), have = new Set();
+  for (const l of lightPool) {
+    const u = l.userData;
+    if (u.src && !want.has(u.src)) { u.fade -= dt * 4; if (u.fade <= 0) { u.src = null; u.fade = 0; } } // no longer among the closest: fade out
+    else if (u.src) have.add(u.src);
+  }
+  for (const l of lightPool) {
+    const u = l.userData;
+    if (!u.src) for (const s of want) if (!have.has(s)) { u.src = s; u.fade = 0; have.add(s); break; } // free light: take a new source
+  }
+  for (const l of lightPool) {
+    const u = l.userData, s = u.src;
+    if (!s) { l.intensity = 0; continue; }
+    if (want.has(s)) u.fade = Math.min(1, u.fade + dt * 4);
+    const e = s.matrixWorld.elements;
+    l.position.set(e[12], e[13], e[14]); l.color.copy(s.color); l.distance = s.distance; l.decay = s.decay; l.intensity = s.intensity * u.fade;
+  }
+}
+initLightPool();
+
+window.__spookie = { renderer, camera, scene, lightPool, lightSrc, GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -55361,6 +55402,7 @@ function tick() {
   updateFarm(dt, t);
   updateVigil(dt);
   updateGrove(dt, t);
+  updateLightPool(dt);
   updateSpell(dt, t);
   updateAudio(dt);
 
