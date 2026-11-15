@@ -6,15 +6,19 @@ const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
 const rr = (a, b) => a + rnd() * (b - a);
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
-const WORLD_R = 30;       // island radius
-const WALK_R = 27;        // how far the player can walk
+const WORLD_R = 40;       // island radius
+const WALK_R = 37;        // how far the player can walk
+const FARM = { x: 19, z: 16 };                      // the farm (south-east)
+const PEN = { x: FARM.x - 7, z: FARM.z - 2, hw: 3.5, hd: 2.5 };       // chicken pen: centre + half sizes
+const FIELD = { x: FARM.x + 1.5, z: FARM.z + 4.5, hw: 4.5, hd: 3 };   // wheat field
+const MILL = { x: FARM.x + 8, z: FARM.z - 4 };                        // windmill
 const HOLLOW = { x: 14, z: -14, r: 9 }; // the Blighted Hollow (hostile area)
 const HOUSE = { x: -11, z: 10, hw: 3, hd: 2.5 }; // blacksmith house (door faces +z)
 
 // gentle rolling hills
 function heightAt(x, z) {
   const h = Math.sin(x * 0.21) * Math.cos(z * 0.17) * 0.8 + Math.sin(x * 0.07 + z * 0.09) * 0.9;
-  return h * smooth(2, 8, Math.hypot(x, z)) * smooth(5, 9, Math.hypot(x - HOUSE.x, z - HOUSE.z)); // keep spawn + house flat
+  return h * smooth(2, 8, Math.hypot(x, z)) * smooth(5, 9, Math.hypot(x - HOUSE.x, z - HOUSE.z)) * smooth(10, 14, Math.hypot(x - FARM.x, z - FARM.z)); // keep spawn, house and farm flat
 }
 
 // ---------- renderer / scene ----------
@@ -55,7 +59,7 @@ const M = {
 
 // ---------- terrain ----------
 function buildTerrain() {
-  const size = WORLD_R * 2 + 4, seg = 44;
+  const size = WORLD_R * 2 + 4, seg = Math.round(size / 1.45);
   const g = new THREE.PlaneGeometry(size, size, seg, seg);
   g.rotateX(-Math.PI / 2);
   const p = g.attributes.position;
@@ -73,11 +77,13 @@ function buildTerrain() {
   flat.computeVertexNormals();
   const pos = flat.attributes.position;
   const colors = new Float32Array(pos.count * 3);
-  const grassA = new THREE.Color(0x2f6b3a), grassB = new THREE.Color(0x3f7f3c), dirt = new THREE.Color(0x3a2c24), blight = new THREE.Color(0x2c1f3a), c = new THREE.Color();
+  const grassA = new THREE.Color(0x2f6b3a), grassB = new THREE.Color(0x3f7f3c), dirt = new THREE.Color(0x3a2c24), blight = new THREE.Color(0x2c1f3a), tilled = new THREE.Color(0x2e2018), straw = new THREE.Color(0x4a3d22), c = new THREE.Color();
   for (let i = 0; i < pos.count; i += 3) {
     const cx = (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3, cy = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3, cz = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3;
     c.copy(grassA).lerp(grassB, rnd()).multiplyScalar(0.7 + rnd() * 0.3);
     if (cy < -0.5 || Math.hypot(cx, cz) > WORLD_R - 1.5) c.copy(dirt).multiplyScalar(0.8 + rnd() * 0.4);
+    if (Math.abs(cx - FIELD.x) < FIELD.hw + 0.4 && Math.abs(cz - FIELD.z) < FIELD.hd + 0.4) c.copy(tilled).multiplyScalar(0.8 + 0.4 * Math.abs(Math.sin(cx * 9.1 + cz * 3.7)));
+    else if (Math.abs(cx - PEN.x) < PEN.hw + 0.3 && Math.abs(cz - PEN.z) < PEN.hd + 0.3) c.copy(straw).multiplyScalar(0.8 + 0.4 * Math.abs(Math.sin(cx * 7.3 + cz * 5.1)));
     const dh = Math.hypot(cx - HOLLOW.x, cz - HOLLOW.z); // corrupted ground inside the hollow
     if (dh < HOLLOW.r + 1) c.lerp(blight.clone().multiplyScalar(0.7 + 0.5 * Math.abs(Math.sin(cx * 12.9 + cz * 78.2))), smooth(HOLLOW.r + 1, HOLLOW.r - 2, dh));
     for (let k = 0; k < 3; k++) colors.set([c.r, c.g, c.b], (i + k) * 3);
@@ -558,6 +564,206 @@ function hspot(minR = 3) { // a free random spot inside the hollow
   }
 }
 
+// ---------- the farm: chicken pen, windmill, wheat field, scarecrow (spooky) ----------
+const farm = { blades: null, uTime: { value: 0 }, chickens: [], arm: null, scare: null, mist: [], stareT: rr(30, 55), cluckT: 6, creakT: 4 };
+avoid.push({ x: PEN.x, z: PEN.z, r: 5.2 }, { x: FIELD.x, z: FIELD.z, r: 5.6 }, { x: MILL.x, z: MILL.z, r: 3.6 });
+{
+  const dead = mat(0x4a3a2c), bale = mat(0xb8a14a, { emissive: 0x403410, emissiveIntensity: 0.5 });
+
+  // --- crooked pen fence (a few rails missing) ---
+  const fenceG = new THREE.Group();
+  function fenceRun(x0, z0, x1, z1) {
+    const horiz = Math.abs(x1 - x0) >= Math.abs(z1 - z0), len = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.round(len));
+    for (let i = 0; i <= n; i++) {
+      const px = x0 + (x1 - x0) * i / n, pz = z0 + (z1 - z0) * i / n;
+      const post = box(0.14, 1.1, 0.14, woodMid, px, 0.55, pz, fenceG); post.rotation.set(rr(-0.1, 0.1), 0, rr(-0.1, 0.1));
+      if (i < n) for (const y of [0.45, 0.85]) {
+        if (rnd() < 0.13) continue; // a broken rail
+        const cx = px + (x1 - x0) / n / 2, cz = pz + (z1 - z0) / n / 2, l = len / n;
+        const rail = box(horiz ? l : 0.07, 0.08, horiz ? 0.07 : l, dead, cx, y + rr(-0.03, 0.03), cz, fenceG);
+        rail.rotation.z = horiz ? rr(-0.04, 0.04) : 0; rail.rotation.x = horiz ? 0 : rr(-0.04, 0.04);
+      }
+    }
+    colliders.push({ x: (x0 + x1) / 2, z: (z0 + z1) / 2, hw: horiz ? len / 2 : 0.12, hd: horiz ? 0.12 : len / 2, r: len / 2 + 0.3 });
+  }
+  const px0 = PEN.x - PEN.hw, px1 = PEN.x + PEN.hw, pz0 = PEN.z - PEN.hd, pz1 = PEN.z + PEN.hd;
+  fenceRun(px0, pz0, px1, pz0); fenceRun(px0, pz1, px1, pz1); fenceRun(px0, pz0, px0, pz1);
+  fenceRun(px1, pz0, px1, PEN.z - 0.9); fenceRun(px1, PEN.z + 0.9, px1, pz1); // gate gap on the side facing the field
+  fenceG.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  scene.add(fenceG);
+
+  // --- coop, hay, trough ---
+  const coop = new THREE.Group(), coopX = PEN.x - 1.8, coopZ = PEN.z - PEN.hd + 1.2;
+  box(2.4, 1.4, 1.7, mat(0x5a2f26), 0, 0.7, 0, coop);
+  for (const sgn of [-1, 1]) { const r = box(2.7, 0.08, 1.2, mat(0x2d2530), 0, 1.65, sgn * 0.45, coop); r.rotation.x = sgn * -0.5; }
+  box(0.5, 0.6, 0.06, mat(0x0a0810), 0.5, 0.45, 0.87, coop); // dark doorway
+  box(0.45, 0.06, 0.8, woodMid, 0.5, 0.2, 1.2, coop).rotation.x = 0.35; // ramp
+  const win = box(0.3, 0.3, 0.06, new THREE.MeshBasicMaterial({ color: 0xffb347 }), -0.6, 0.9, 0.87, coop); win.name = 'coopWindow';
+  coop.position.set(coopX, 0, coopZ); coop.rotation.y = 0.05;
+  coop.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  scene.add(coop);
+  colliders.push({ x: coopX, z: coopZ, hw: 1.3, hd: 0.95, r: 1.8 });
+  for (const [dx, dz, rot] of [[1.6, 0.4, 0.3], [2.3, 0.9, -0.2]]) {
+    const b = cyl(0.4, 0.4, 0.7, 8, bale, PEN.x + dx + 1.4, 0.4, PEN.z - PEN.hd + 1.3 + dz, scene); b.rotation.z = Math.PI / 2; b.rotation.y = rot; b.castShadow = true;
+  }
+  box(1.3, 0.3, 0.4, woodDark, PEN.x + 1.2, 0.2, PEN.z + PEN.hd - 0.8, scene);
+
+  // --- windmill (leaning a little, blades turn slowly) ---
+  const mill = new THREE.Group();
+  cyl(1.5, 2.1, 5, 8, mat(0x5c4a3e), 0, 2.5, 0, mill);
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(2.0, 1.8, 8), mat(0x2a2230)); cap.position.y = 5.9; mill.add(cap);
+  box(0.9, 1.6, 0.14, mat(0x1e140e), 0, 0.8, 2.0, mill);                       // door
+  box(0.5, 0.6, 0.1, new THREE.MeshBasicMaterial({ color: 0xff9a3c }), 0, 3.1, 1.72, mill); // glowing window
+  for (const y of [1.4, 2.8, 4.2]) cyl(1.9 - y * 0.12, 1.9 - y * 0.12, 0.1, 8, woodDark, 0, y, 0, mill);
+  const hub = new THREE.Group(); hub.position.set(0, 4.9, 2.0); mill.add(hub);
+  box(0.4, 0.4, 0.5, woodDark, 0, 0, 0, hub);
+  for (let i = 0; i < 4; i++) {
+    const arm = new THREE.Group(); arm.rotation.z = i * Math.PI / 2; hub.add(arm);
+    box(0.14, 4.4, 0.08, woodDark, 0, 2.2, 0, arm);
+    if (i !== 2) { // one sail is torn off
+      const sail = box(0.95, 3.0, 0.04, mat(0x6a5a48), 0.55, 2.5, 0.06, arm);
+      for (const y of [-1, -0.3, 0.4, 1.1]) box(0.95, 0.05, 0.06, woodMid, 0.55, 2.5 + y, 0.09, arm);
+    } else box(0.5, 1.0, 0.04, mat(0x6a5a48), 0.3, 3.7, 0.06, arm).rotation.z = 0.4;
+  }
+  mill.position.set(MILL.x, 0, MILL.z); mill.rotation.set(0.02, -0.5, 0.035);
+  mill.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  scene.add(mill); farm.blades = hub;
+  colliders.push({ x: MILL.x, z: MILL.z, r: 2.3 });
+
+  // --- scarecrow with a glowing pumpkin head ---
+  const sc = new THREE.Group(), burlap = mat(0x8a7348);
+  cyl(0.06, 0.08, 2.4, 5, woodDark, 0, 1.2, 0, sc);
+  box(0.5, 0.8, 0.3, burlap, 0, 1.3, 0, sc);
+  const arms = new THREE.Group(); arms.position.y = 1.65; sc.add(arms);
+  box(1.8, 0.09, 0.09, woodDark, 0, 0, 0, arms);
+  for (const x of [-0.8, -0.5, 0.5, 0.8]) box(0.06, 0.35, 0.03, burlap, x, -0.22, 0, arms); // tattered strips
+  const pump = new THREE.Mesh(new THREE.SphereGeometry(0.3, 7, 5), M.pumpkin); pump.scale.y = 0.85; pump.position.y = 2.15; sc.add(pump);
+  box(0.09, 0.09, 0.05, M.glow, -0.12, 2.2, 0.26, sc); box(0.09, 0.09, 0.05, M.glow, 0.12, 2.2, 0.26, sc); box(0.28, 0.07, 0.05, M.glow, 0, 2.06, 0.27, sc);
+  const hat = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.5, 6), mat(0x241c2c)); hat.position.y = 2.65; sc.add(hat);
+  cyl(0.4, 0.4, 0.04, 8, mat(0x241c2c), 0, 2.42, 0, sc);
+  const sl = new THREE.PointLight(0xff8a2a, 5, 9, 1.6); sl.position.set(0, 2.15, 0.5); sl.userData.base = 5; flickers.push(sl); sc.add(sl);
+  sc.position.set(FIELD.x, 0, FIELD.z); sc.rotation.set(0.04, 0.3, 0.07);
+  sc.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  scene.add(sc); farm.arm = arms; farm.scare = sc;
+  colliders.push({ x: FIELD.x, z: FIELD.z, r: 0.4 });
+
+  // --- wheat: dim and swaying; the sway is done on the GPU so hundreds of stalks stay cheap ---
+  const sway = (m, amp) => {
+    m.onBeforeCompile = sh => {
+      sh.uniforms.uTime = farm.uTime;
+      sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+        `#include <begin_vertex>
+         float ph = uTime * 1.5 + instanceMatrix[3].x * 0.8 + instanceMatrix[3].z * 0.5;
+         transformed.x += sin(ph) * ${amp.toFixed(2)} * position.y;
+         transformed.z += cos(ph * 0.8) * ${(amp * 0.5).toFixed(2)} * position.y;`);
+    };
+    return m;
+  };
+  const stalkG = new THREE.BoxGeometry(0.04, 1, 0.04); stalkG.translate(0, 0.5, 0);
+  const earG = new THREE.ConeGeometry(0.07, 0.34, 4); earG.translate(0, 1.1, 0);
+  const cells = [];
+  for (let x = FIELD.x - FIELD.hw + 0.3; x < FIELD.x + FIELD.hw - 0.2; x += 0.34) for (let z = FIELD.z - FIELD.hd + 0.3; z < FIELD.z + FIELD.hd - 0.2; z += 0.3) {
+    if (Math.hypot(x - FIELD.x, z - FIELD.z) < 0.7) continue;
+    cells.push([x + rr(-0.09, 0.09), z + rr(-0.09, 0.09), rr(0.6, 1.15)]);
+  }
+  const stalks = new THREE.InstancedMesh(stalkG, sway(mat(0x7c6c2a, { emissive: 0x2a2208, emissiveIntensity: 0.6 }), 0.1), cells.length);
+  const ears = new THREE.InstancedMesh(earG, sway(mat(0xc2a24a, { emissive: 0x4a3a0c, emissiveIntensity: 0.7 }), 0.1), cells.length);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc3 = new THREE.Vector3(), pos3 = new THREE.Vector3();
+  cells.forEach(([x, z, h], i) => {
+    q.setFromEuler(new THREE.Euler(rr(-0.1, 0.1), rnd() * 6, rr(-0.1, 0.1))); sc3.set(1, h, 1); pos3.set(x, 0, z);
+    m4.compose(pos3, q, sc3); stalks.setMatrixAt(i, m4); ears.setMatrixAt(i, m4);
+  });
+  stalks.castShadow = false; ears.castShadow = false; scene.add(stalks, ears);
+
+  // --- thin mist drifting over the field and pen ---
+  for (const [x, z, r] of [[FIELD.x, FIELD.z, 4.2], [FIELD.x - 4, FIELD.z + 1, 3.2], [PEN.x, PEN.z, 3.4]]) {
+    const m = new THREE.Mesh(new THREE.CircleGeometry(r, 18), new THREE.MeshBasicMaterial({ color: 0x9fb0c8, transparent: true, opacity: 0.1, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2; m.position.set(x, 0.55, z); m.userData = { x, z, ph: rnd() * 6 }; scene.add(m); farm.mist.push(m);
+  }
+}
+
+// --- chickens (they live in the pen) ---
+function makeChicken(col) {
+  const g = new THREE.Group(), fur = mat(col, { emissive: col, emissiveIntensity: 0.25 }), red = mat(0xc22a2a, { emissive: 0x601010, emissiveIntensity: 0.6 });
+  const beakM = mat(0xe8a030), legM = mat(0xc9a040), dark = new THREE.MeshBasicMaterial({ color: 0x111111 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.22, 7, 5), fur); body.scale.set(1, 0.9, 1.3); body.position.y = 0.3; g.add(body);
+  const head = new THREE.Group(); head.position.set(0, 0.52, 0.2); g.add(head);
+  head.add(new THREE.Mesh(new THREE.SphereGeometry(0.1, 6, 5), fur));
+  box(0.04, 0.08, 0.1, red, 0, 0.12, 0, head); box(0.03, 0.07, 0.03, red, 0, -0.08, 0.08, head);
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.1, 4), beakM); beak.rotation.x = Math.PI / 2; beak.position.set(0, 0, 0.12); head.add(beak);
+  box(0.025, 0.025, 0.02, dark, -0.06, 0.03, 0.07, head); box(0.025, 0.025, 0.02, dark, 0.06, 0.03, 0.07, head);
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.3, 4), fur); tail.position.set(0, 0.42, -0.3); tail.rotation.x = -0.9; g.add(tail);
+  const wings = [];
+  for (const sx of [-1, 1]) { const w = new THREE.Group(); w.position.set(sx * 0.2, 0.36, 0); g.add(w); box(0.04, 0.16, 0.3, fur, 0, -0.07, 0, w); wings.push(w); }
+  for (const sx of [-1, 1]) box(0.03, 0.18, 0.03, legM, sx * 0.07, 0.09, 0.03, g);
+  g.scale.setScalar(1.25);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return { g, head, wings };
+}
+{
+  const cols = [0xf2eee2, 0x9a6a46, 0xf2eee2, 0x2e2a38, 0xb98a5a, 0xe8dcc4];
+  const coopBox = { x: PEN.x - 1.8, z: PEN.z - PEN.hd + 1.2, hw: 1.3, hd: 0.95 };
+  farm.coopBox = coopBox;
+  for (let i = 0; i < 6; i++) {
+    let x, z, tries = 0;
+    do { x = PEN.x + rr(-PEN.hw + 0.7, PEN.hw - 0.7); z = PEN.z + rr(-PEN.hd + 0.7, PEN.hd - 0.7); tries++; }
+    while (tries < 40 && Math.abs(x - coopBox.x) < coopBox.hw + 0.5 && Math.abs(z - coopBox.z) < coopBox.hd + 0.5);
+    const c = Object.assign(makeChicken(cols[i]), { x, z, face: rnd() * 6.28, state: 'peck', t: 0, dur: rr(1, 3), tx: x, tz: z, ph: rnd() * 6, flap: 0, hopY: 0 });
+    c.g.position.set(x, 0, z); c.g.rotation.y = c.face; scene.add(c.g); farm.chickens.push(c);
+  }
+}
+function updateFarm(dt, t) {
+  farm.uTime.value = t;
+  farm.blades.rotation.z += dt * 0.4;                                   // slow, ominous
+  farm.arm.rotation.z = Math.sin(t * 1.1) * 0.08; farm.scare.rotation.z = 0.07 + Math.sin(t * 0.7) * 0.03;
+  for (const m of farm.mist) { const u = m.userData; m.position.x = u.x + Math.sin(t * 0.12 + u.ph) * 1.2; m.position.z = u.z + Math.cos(t * 0.09 + u.ph) * 0.8; m.material.opacity = 0.085 + Math.sin(t * 0.3 + u.ph) * 0.03; }
+  if (world !== 'outside') return;
+  const dm = Math.hypot(MILL.x - pPos.x, MILL.z - pPos.y);
+  if (dm < 22) { farm.creakT -= dt; if (farm.creakT <= 0) { farm.creakT = rr(4.5, 8); sfx.creak(0.1 * (1 - dm / 22)); } }
+  const dp = Math.hypot(PEN.x - pPos.x, PEN.z - pPos.y);
+  if (dp < 16) { farm.cluckT -= dt; if (farm.cluckT <= 0) { farm.cluckT = rr(4, 10); sfx.cluck(0.09 * (1 - dp / 16)); } }
+  farm.stareT -= dt;
+  const stare = farm.stareT <= 0 && dp < 11;
+  if (farm.stareT <= 0) farm.stareT = rr(35, 70);
+  for (const c of farm.chickens) {
+    const px = pPos.x - c.x, pz = pPos.y - c.z, pd = Math.hypot(px, pz), g = c.g;
+    c.t += dt;
+    if (stare && c.state !== 'scatter') { c.state = 'stare'; c.t = 0; c.dur = 3.2; } // all of them turn and stare at once
+    if (pd < 2.3 && c.state !== 'scatter' && c.state !== 'stare') { // startled: run, flap, hop
+      c.state = 'scatter'; c.t = 0; c.dur = 1.1; const a = Math.atan2(-pz, -px) + rr(-0.8, 0.8); c.tx = c.x + Math.cos(a) * 2.5; c.tz = c.z + Math.sin(a) * 2.5;
+      if (pd < 14) sfx.cluck(0.1);
+    }
+    let moving = false, headX = 0.1;
+    if (c.state === 'peck') {
+      headX = 0.85 + Math.sin(t * 14 + c.ph) * 0.15;
+      if (c.t > c.dur) { c.state = 'walk'; c.t = 0; c.tx = PEN.x + rr(-PEN.hw + 0.7, PEN.hw - 0.7); c.tz = PEN.z + rr(-PEN.hd + 0.7, PEN.hd - 0.7); }
+    } else if (c.state === 'walk') {
+      const dx = c.tx - c.x, dz = c.tz - c.z, d = Math.hypot(dx, dz);
+      if (d < 0.2 || c.t > 6) { c.state = 'peck'; c.t = 0; c.dur = rr(1.5, 4); }
+      else { c.x += dx / d * 0.9 * dt; c.z += dz / d * 0.9 * dt; c.face = Math.atan2(dx, dz); moving = true; headX = 0.15 + Math.sin(t * 9 + c.ph) * 0.1; }
+    } else if (c.state === 'scatter') {
+      const dx = c.tx - c.x, dz = c.tz - c.z, d = Math.hypot(dx, dz);
+      if (d > 0.1) { c.x += dx / d * 3.2 * dt; c.z += dz / d * 3.2 * dt; c.face = Math.atan2(dx, dz); }
+      moving = true; headX = -0.3;
+      if (c.t > c.dur) { c.state = 'peck'; c.t = 0; c.dur = rr(1, 2.5); }
+    } else if (c.state === 'stare') {
+      c.face = Math.atan2(px, pz); headX = -0.2;
+      if (c.t > c.dur) { c.state = 'peck'; c.t = 0; c.dur = rr(1, 2.5); }
+    }
+    // keep inside the pen, away from the coop
+    c.x = Math.min(PEN.x + PEN.hw - 0.5, Math.max(PEN.x - PEN.hw + 0.5, c.x)); c.z = Math.min(PEN.z + PEN.hd - 0.5, Math.max(PEN.z - PEN.hd + 0.5, c.z));
+    pushOut(c, farm.coopBox, 0.5);
+    for (const o of farm.chickens) { if (o === c) continue; const ox = c.x - o.x, oz = c.z - o.z, od = Math.hypot(ox, oz); if (od < 0.5 && od > 0.001) { c.x += ox / od * (0.5 - od) * 0.5; c.z += oz / od * (0.5 - od) * 0.5; } }
+    // pose
+    const flapping = c.state === 'scatter';
+    g.position.set(c.x, (moving ? Math.abs(Math.sin(t * (flapping ? 16 : 10) + c.ph)) * (flapping ? 0.18 : 0.04) : 0), c.z);
+    g.rotation.y += Math.atan2(Math.sin(c.face - g.rotation.y), Math.cos(c.face - g.rotation.y)) * Math.min(1, dt * 10);
+    c.head.rotation.x += (headX - c.head.rotation.x) * Math.min(1, dt * 14);
+    const wa = flapping ? 0.3 + Math.sin(t * 30 + c.ph) * 0.9 : 0.12;
+    c.wings[0].rotation.z = -wa; c.wings[1].rotation.z = wa;
+  }
+}
+
 // graveyard patch near the middle-ish, trees around, pumpkins scattered
 for (let i = 0; i < 16; i++) { // tombstones in a cluster
   const a = rnd() * 6.28, d = Math.sqrt(rr(16, 90));
@@ -565,20 +771,21 @@ for (let i = 0; i < 16; i++) { // tombstones in a cluster
   if (Math.hypot(x, z) > 5 && Math.hypot(x, z) < WALK_R - 2 && colliders.every(c => Math.hypot(c.x - x, c.z - z) > 1.6))
     place(tombstone(), x, z, 0.6);
 }
-for (let i = 0; i < 34; i++) { const [x, z] = spot(5, WORLD_R - 2); place(deadTree(), x, z, 0.45); }
-for (let i = 0; i < 10; i++) { const [x, z] = spot(4, WALK_R - 1); place(pumpkin(), x, z, 0.5); }
+for (let i = 0; i < 50; i++) { const [x, z] = spot(5, WORLD_R - 2); place(deadTree(), x, z, 0.45); }
+for (let i = 0; i < 14; i++) { const [x, z] = spot(4, WALK_R - 1); place(pumpkin(), x, z, 0.5); }
 
 // spiky grass tufts (low-poly cones, instanced)
 {
   const geo = new THREE.ConeGeometry(0.09, 0.45, 3);
   geo.translate(0, 0.22, 0);
-  const n = 1400, inst = new THREE.InstancedMesh(geo, mat(0x4f9a4a), n);
+  const n = Math.round(1400 * (WORLD_R / 30) ** 2), inst = new THREE.InstancedMesh(geo, mat(0x4f9a4a), n);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), pos = new THREE.Vector3(), col = new THREE.Color();
   for (let i = 0; i < n; i++) {
     const a = rnd() * 6.28, d = Math.sqrt(rnd()) * (WORLD_R - 2), x = Math.cos(a) * d, z = Math.sin(a) * d;
     pos.set(x, heightAt(x, z), z);
     q.setFromEuler(new THREE.Euler(rr(-0.2, 0.2), rnd() * 6.28, rr(-0.2, 0.2)));
-    s.setScalar(rr(0.7, 1.6));
+    const inFarm = (Math.abs(x - FIELD.x) < FIELD.hw + 0.5 && Math.abs(z - FIELD.z) < FIELD.hd + 0.5) || (Math.abs(x - PEN.x) < PEN.hw + 0.5 && Math.abs(z - PEN.z) < PEN.hd + 0.5);
+    s.setScalar(inFarm ? 0.0001 : rr(0.7, 1.6)); // no grass tufts poking through the field or pen
     inst.setMatrixAt(i, m.compose(pos, q, s));
     inst.setColorAt(i, col.setHSL(rr(0.25, 0.36), 0.45, rr(0.2, 0.34)));
   }
@@ -600,7 +807,7 @@ for (let i = 0; i < 4; i++) {
 const wisps = [];
 {
   const geo = new THREE.OctahedronGeometry(0.07, 0);
-  for (let i = 0; i < 45; i++) {
+  for (let i = 0; i < 70; i++) {
     const w = new THREE.Mesh(geo, M.wisp);
     const a = rnd() * 6.28, d = Math.sqrt(rnd()) * (WORLD_R - 3);
     w.userData = { x: Math.cos(a) * d, z: Math.sin(a) * d, y: rr(0.6, 2.8), ph: rnd() * 6.28, sp: rr(0.4, 1.2) };
@@ -1577,6 +1784,8 @@ const sfxImpl = {
   },
   swing() { noise(0.18, 'bandpass', 800, 2600, 0.22, 0, 1.5); },
   caw(v = 0.1) { for (const [d, f] of [[0, 520], [0.24, 450]]) { tone(f, 0.17, 'sawtooth', v, f * 0.62, d); noise(0.16, 'bandpass', 1300, 700, v * 0.9, d, 3); } },
+  cluck(v = 0.08) { tone(720, 0.05, 'square', v, 520); tone(640, 0.07, 'square', v * 0.9, 420, 0.07); noise(0.05, 'bandpass', 1500, 900, v * 0.5, 0, 2); },
+  creak(v = 0.08) { tone(70, 0.7, 'sawtooth', v, 120); tone(105, 0.6, 'sawtooth', v * 0.6, 170, 0.1); noise(0.6, 'bandpass', 260, 520, v * 0.9, 0, 5); },
   hop(v = 0.06) { tone(150, 0.07, 'sine', v, 80); noise(0.04, 'lowpass', 500, null, v * 0.6); },
   hit() { noise(0.1, 'lowpass', 1600, null, 0.28); tone(150, 0.12, 'square', 0.16, 60); },
   skelDie() { for (let i = 0; i < 6; i++) noise(0.04, 'highpass', 1800 + Math.random() * 1500, null, 0.18, i * 0.045); tone(90, 0.3, 'sine', 0.2, 45, 0.05); },
@@ -1667,7 +1876,7 @@ function updateAudio(dt) {
   }
 }
 
-window.__spookie = { crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+window.__spookie = { farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
@@ -1770,6 +1979,7 @@ function tick() {
   updateCombat(dt, t);
   updateBunnies(dt, t);
   updateCrows(dt, t);
+  updateFarm(dt, t);
   updateSpell(dt, t);
   updateAudio(dt);
 
