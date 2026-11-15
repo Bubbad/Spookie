@@ -963,18 +963,23 @@ avoid.push({ x: SAWMILL.x, z: SAWMILL.z, r: 8 });
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const p = box(0.35, 3.2, 0.35, woodDark, sx * 3.4, 1.6, sz * 2.4, shed); p.rotation.z = sx * 0.02; }
   { const r = box(8.2, 0.12, 2.8, dark, 0, 3.35, -1.5, shed); r.rotation.x = -0.18; }                  // a roof over the back half only, so the camera can see the saw
   for (const x of [-3.4, -1.7, 0, 1.7, 3.4]) box(0.14, 0.14, 2.6, woodDark, x, 3.3, 1.4, shed);          // bare rafters over the front
-  box(5, 0.9, 1.3, woodMid, 0, 0.55, 0, shed);                                      // the saw bench
-  for (const sx of [-0.55, 0.55]) box(0.1, 0.1, 5, metal, sx, 1.05, 0, shed);       // rails
-  // circular blade (appears when the mill is mended)
-  const blade = new THREE.Group(); blade.position.set(0, 1.7, 0); shed.add(blade);
-  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.05, 20), steel); disc.rotation.x = Math.PI / 2; blade.add(disc);
-  for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2, tooth = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.22, 3), steel); tooth.position.set(Math.cos(a) * 0.98, Math.sin(a) * 0.98, 0); tooth.rotation.z = a - Math.PI / 2; blade.add(tooth); }
-  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.16, 8), metal); hub.rotation.x = Math.PI / 2; blade.add(hub);
+  // the cutting rig: its feed direction (local Z) runs along the world X axis, so the log slides left to right and the camera sees the blade face-on
+  const rig = new THREE.Group(); rig.rotation.y = Math.PI / 2; shed.add(rig);
+  box(1.6, 0.9, 5.4, woodMid, 0, 0.55, 0, rig);                                      // the saw bench
+  for (const sx of [-0.55, 0.55]) box(0.1, 0.1, 5.4, metal, sx, 1.05, 0, rig);      // rails
+  // circular blade (appears when the mill is mended). Its disc lies along the log's path, with the top poking up through the bench,
+  // so the log is sliced lengthwise as it slides past. It spins around the X axis.
+  const blade = new THREE.Group(); blade.position.set(0, 1.3, 0); rig.add(blade);
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.72, 0.04, 22), steel); disc.rotation.z = Math.PI / 2; blade.add(disc);
+  for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2, tooth = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.2, 3), steel); tooth.position.set(0, Math.cos(a) * 0.8, Math.sin(a) * 0.8); tooth.rotation.x = a; blade.add(tooth); }
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.12, 8), metal); hub.rotation.z = Math.PI / 2; blade.add(hub);
   blade.visible = false;
-  // carriage with a log on it
-  const carriage = new THREE.Group(); carriage.position.set(0, 1.18, -1.4); shed.add(carriage);
-  box(1.2, 0.12, 2.6, woodDark, 0, 0, 0, carriage);
-  const log = cyl(0.34, 0.34, 2.4, 8, mat(0x6a4a30), 0, 0.42, 0, carriage); log.rotation.x = Math.PI / 2;
+  const cutLight = new THREE.PointLight(0xffb060, 6, 9, 1.5); cutLight.position.set(0, 2.8, 0); cutLight.userData.base = 0; flickers.push(cutLight); rig.add(cutLight); sawmill.cutLight = cutLight; // lights the blade while it runs
+  // carriage: two boards with a slot between them for the blade. The log rides on it and is split into two fresh boards as it passes the blade.
+  const carriage = new THREE.Group(); carriage.position.set(0, 1.16, -1.5); rig.add(carriage);
+  box(0.56, 0.12, 2.6, woodDark, -0.33, 0, 0, carriage); box(0.56, 0.12, 2.6, woodDark, 0.33, 0, 0, carriage);
+  const logUncut = cyl(0.34, 0.34, 1, 8, mat(0x6a4a30), 0, 0.42, 0, carriage); logUncut.rotation.x = Math.PI / 2;
+  const freshM = mat(0xc9a56a), cutA = box(0.3, 0.62, 1, freshM, -0.17, 0.42, 0, carriage), cutB = box(0.3, 0.62, 1, freshM, 0.17, 0.42, 0, carriage);
   // lever
   const lever = new THREE.Group(); lever.position.set(3.0, 1.0, 1.0); shed.add(lever);
   box(0.12, 1.0, 0.12, metal, 0, 0.5, 0, lever); box(0.3, 0.12, 0.12, woodDark, 0, 1.0, 0, lever); lever.rotation.z = -0.8;
@@ -989,8 +994,8 @@ avoid.push({ x: SAWMILL.x, z: SAWMILL.z, r: 8 });
   shed.position.set(SAWMILL.x, 0, SAWMILL.z); shed.rotation.y = 0;
   shed.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   scene.add(shed);
-  Object.assign(sawmill, { blade, carriage, lever });
-  colliders.push({ x: SAWMILL.x, z: SAWMILL.z, hw: 2.55, hd: 0.8, r: 3 });
+  Object.assign(sawmill, { blade, carriage, lever, logUncut, cutA, cutB, cutting: false });
+  colliders.push({ x: SAWMILL.x, z: SAWMILL.z, hw: 2.7, hd: 0.8, r: 3 });
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) colliders.push({ x: SAWMILL.x + sx * 3.4, z: SAWMILL.z + sz * 2.4, r: 0.35 });
   colliders.push({ x: SAWMILL.x - 4.8, z: SAWMILL.z + 1.2, r: 1.5 }, { x: SAWMILL.x + 4.9, z: SAWMILL.z - 1.4, r: 1.1 });
 
@@ -1015,18 +1020,26 @@ avoid.push({ x: SAWMILL.x, z: SAWMILL.z, r: 8 });
 }
 function setSawmillRunning(on) {
   sawmill.running = on; sawmill.blade.visible = on; sawmill.lever.rotation.z = on ? 0.6 : -0.8;
-  sawmill.lampM.color.setHex(on ? 0xffb060 : 0x9affc8); sawmill.light.color.setHex(on ? 0xffb060 : 0x9affc8); sawmill.light.userData.base = on ? 9 : 5;
+  sawmill.cutLight.userData.base = on ? 7 : 0; sawmill.lampM.color.setHex(on ? 0xffb060 : 0x9affc8); sawmill.light.color.setHex(on ? 0xffb060 : 0x9affc8); sawmill.light.userData.base = on ? 9 : 5;
 }
 function updateSawmill(dt, t) {
   sawyer.marker.visible = SAW.state === 'none' || SAW.state === 'ready';
   sawyer.marker.position.y = 2.6 + Math.sin(t * 3) * 0.1; sawyer.marker.rotation.y = t * 2;
   if (SAW.state === 'wood' && inv.logs >= SAW.need) { SAW.state = 'ready'; renderQuestHud(); toast('Enough logs! Bring them to Bram'); sfx.soul(); }
   if (!sawmill.running) return;
-  sawmill.blade.rotation.z -= dt * 20;
-  sawmill.carriage.position.z = Math.sin(t * 0.5) * 1.5;
+  sawmill.blade.rotation.x -= dt * 22;
+  const T = 7, FWD = 0.82, ph = (t % T) / T;                         // one cycle: a slow cutting pass, then a quick return with an empty carriage
+  const pz = ph < FWD ? -1.5 + 3.0 * (ph / FWD) : 1.5 - 3.0 * ((ph - FWD) / (1 - FWD));
+  sawmill.carriage.position.z = pz;
+  const zb = -pz, uncut = Math.max(0, Math.min(2.4, zb + 1.2)), cut = Math.max(0, Math.min(2.4, 1.2 - zb));   // the blade sits at z = -pz in the carriage's own frame
+  const loaded = ph < FWD;
+  sawmill.cutting = loaded && uncut > 0.05 && cut > 0.05;
+  sawmill.logUncut.visible = loaded && uncut > 0.02; sawmill.logUncut.scale.y = Math.max(uncut, 0.001); sawmill.logUncut.position.z = -1.2 + uncut / 2;
+  for (const c of [sawmill.cutA, sawmill.cutB]) { c.visible = loaded && cut > 0.02; c.scale.z = Math.max(cut, 0.001); c.position.z = 1.2 - cut / 2; }
+  sawmill.cutA.position.x = -0.17 - 0.03; sawmill.cutB.position.x = 0.17 + 0.03;
   if (world === 'outside' && Math.hypot(SAWMILL.x - pPos.x, SAWMILL.z - pPos.y) < 28) {
     sawmill.dustT -= dt;
-    if (sawmill.dustT <= 0 && Math.abs(sawmill.carriage.position.z) < 0.8) { sawmill.dustT = 0.12; spawnFx(SAWMILL.x, 1.9, SAWMILL.z, 0xe8d4a0, 2); } // sawdust where the blade bites
+    if (sawmill.dustT <= 0 && sawmill.cutting) { sawmill.dustT = 0.12; spawnFx(SAWMILL.x, 1.9, SAWMILL.z, 0xe8d4a0, 2); } // sawdust where the blade bites
   }
 }
 function talkToSawyer() {
