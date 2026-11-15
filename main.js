@@ -6,9 +6,9 @@ const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
 const rr = (a, b) => a + rnd() * (b - a);
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
-const WORLD_R = 40;       // island radius
-const WALK_R = 37;        // how far the player can walk
-const FARM = { x: 19, z: 16 };                      // the farm (south-east)
+const WORLD_R = 50;       // island radius
+const WALK_R = 47;        // how far the player can walk
+const FARM = { x: 27, z: 23 };                      // the farm (far south-east)
 const PEN = { x: FARM.x - 7, z: FARM.z - 2, hw: 3.5, hd: 2.5 };       // chicken pen: centre + half sizes
 const FIELD = { x: FARM.x + 1.5, z: FARM.z + 4.5, hw: 4.5, hd: 3 };   // wheat field
 const MILL = { x: FARM.x + 8, z: FARM.z - 4 };                        // windmill
@@ -771,8 +771,8 @@ for (let i = 0; i < 16; i++) { // tombstones in a cluster
   if (Math.hypot(x, z) > 5 && Math.hypot(x, z) < WALK_R - 2 && colliders.every(c => Math.hypot(c.x - x, c.z - z) > 1.6))
     place(tombstone(), x, z, 0.6);
 }
-for (let i = 0; i < 50; i++) { const [x, z] = spot(5, WORLD_R - 2); place(deadTree(), x, z, 0.45); }
-for (let i = 0; i < 14; i++) { const [x, z] = spot(4, WALK_R - 1); place(pumpkin(), x, z, 0.5); }
+for (let i = 0; i < 75; i++) { const [x, z] = spot(5, WORLD_R - 2); place(deadTree(), x, z, 0.45); }
+for (let i = 0; i < 20; i++) { const [x, z] = spot(4, WALK_R - 1); place(pumpkin(), x, z, 0.5); }
 
 // spiky grass tufts (low-poly cones, instanced)
 {
@@ -795,7 +795,7 @@ for (let i = 0; i < 14; i++) { const [x, z] = spot(4, WALK_R - 1); place(pumpkin
 
 // ghosts drifting around
 const ghosts = [];
-for (let i = 0; i < 4; i++) {
+for (let i = 0; i < 6; i++) {
   const g = ghost(), a = rnd() * 6.28, d = rr(8, WALK_R - 4);
   g.userData = { cx: Math.cos(a) * d, cz: Math.sin(a) * d, r: rr(2, 5), sp: rr(0.2, 0.5), ph: rnd() * 6.28 };
   const u0 = g.userData; // start on their orbit, not at the world origin (the spawn point)
@@ -807,7 +807,7 @@ for (let i = 0; i < 4; i++) {
 const wisps = [];
 {
   const geo = new THREE.OctahedronGeometry(0.07, 0);
-  for (let i = 0; i < 70; i++) {
+  for (let i = 0; i < 100; i++) {
     const w = new THREE.Mesh(geo, M.wisp);
     const a = rnd() * 6.28, d = Math.sqrt(rnd()) * (WORLD_R - 3);
     w.userData = { x: Math.cos(a) * d, z: Math.sin(a) * d, y: rr(0.6, 2.8), ph: rnd() * 6.28, sp: rr(0.4, 1.2) };
@@ -1514,7 +1514,7 @@ function makeBunny(col) {
 }
 {
   const furs = [0xa07c55, 0xc4b09c, 0x8a7058, 0xf0ebe0, 0xb08a60];
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 12; i++) {
     let x, z, tries = 0;
     do { [x, z] = spot(5, WALK_R - 3); tries++; } while (tries < 60 && (inHollow(x, z, 3) || Math.hypot(x - HOUSE.x, z - HOUSE.z) < 6));
     const b = makeBunny(furs[i % furs.length]);
@@ -1597,7 +1597,7 @@ function freeTree(minPlayerDist) {
 function perchCrow(c, tr) {
   c.tree = tr; const p = crowTreeTop(tr); c.x = p.x; c.y = p.y; c.z = p.z; c.state = 'perch'; c.t = 0; c.g.visible = true;
 }
-for (let i = 0; i < 6; i++) {
+for (let i = 0; i < 8; i++) {
   const tr = freeTree(0); if (!tr) break;
   const k = makeCrow();
   const c = Object.assign(k, { tree: null, x: 0, y: 0, z: 0, state: 'perch', t: 0, face: rnd() * 6.28, ph: rnd() * 6, gone: 0, cawT: rr(8, 25) });
