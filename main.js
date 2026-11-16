@@ -837,7 +837,7 @@ const grove = { mats: [], decals: [], sparks: [], clusters: [], inside: false };
   const cx = cv.getContext('2d'), gr = cx.createRadialGradient(64, 64, 0, 64, 64, 64);
   gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(0.4, 'rgba(255,255,255,0.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
   cx.fillStyle = gr; cx.fillRect(0, 0, 128, 128);
-  const glowTex = new THREE.CanvasTexture(cv);
+  const glowTex = new THREE.CanvasTexture(cv); grove.glowTex = glowTex;
   grove.mats = CRYSTAL_COLS.map(col => mat(col, { emissive: col, emissiveIntensity: 1.4, roughness: 0.25, metalness: 0.2 }));
   grove.decals = CRYSTAL_COLS.map(col => new THREE.MeshBasicMaterial({ color: col, map: glowTex, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
   const decalG = new THREE.PlaneGeometry(1, 1);
@@ -1551,6 +1551,16 @@ renderHearts();
 
 // the player's sword (left hand) and its slash arc
 let swordBladeMat;
+const swordGlow = { on: false, halo: null, sprite: null, aura: null, freeze: null }; // freeze: tests can pin the pulse at 0..1
+function enableSwordGlow() { // a cyan halo around the blade plus a soft aura, both pulsing in updateCombat
+  if (swordGlow.on) return;
+  swordGlow.halo = box(0.22, 0.2, 1.2, new THREE.MeshBasicMaterial({ color: 0x35e0ff, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false }), 0, 0, 0.82, swordPivot);
+  swordGlow.sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: grove.glowTex, color: 0x5ff0ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
+  swordGlow.sprite.position.set(0, 0, 0.85); swordPivot.add(swordGlow.sprite);
+  swordGlow.aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: grove.glowTex, color: 0x35e0ff, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false }));
+  swordGlow.aura.position.set(0, 0, 0.7); swordPivot.add(swordGlow.aura); // a wide, faint glow that lights the air around the sword
+  swordBladeMat.emissive.setHex(0x35e0ff); swordGlow.on = true;
+}
 const swordPivot = new THREE.Group();
 swordPivot.position.set(-0.34, 0.95, 0.2);
 swordPivot.rotation.set(0.55, -0.25, 0);
@@ -1698,6 +1708,13 @@ function updateCombat(dt, t) {
     if (p >= 1) { combat.atkT = 0; swordPivot.rotation.set(0.55, -0.25, 0); slash.material.opacity = 0; }
   }
   body.visible = combat.inv <= 0 || Math.floor(t * 14) % 2 === 0;
+  if (swordGlow.on) { // the upgraded blade breathes: glow swells and fades about every three seconds
+    const k = swordGlow.freeze ?? 0.5 + 0.5 * Math.sin(t * 2.1);
+    swordBladeMat.emissiveIntensity = 0.5 + 2.4 * k;
+    swordGlow.halo.material.opacity = 0.08 + 0.45 * k;
+    swordGlow.sprite.material.opacity = 0.15 + 0.75 * k; swordGlow.sprite.scale.setScalar(1.4 + 1.1 * k);
+    swordGlow.aura.material.opacity = 0.03 + 0.24 * k; swordGlow.aura.scale.setScalar(2.4 + 1.8 * k);
+  }
   // particles
   for (const f of fxPool) {
     const u = f.userData; if (u.life <= 0) continue;
@@ -2065,7 +2082,7 @@ const RECIPES = {
   anvil: { title: 'Anvil', rows: [
     { gain: { nails: 4 }, cost: { iron: 1 } },
     { name: 'Crystal Lantern', note: 'a brighter lantern that reaches farther', cost: { shards: 6, iron: 2 }, once: 'lantern', apply: () => { lantern.userData.base = 10; lantern.distance = 30; } },
-    { name: 'Crystal Edge', note: 'the sword hits for double damage', cost: { shards: 8, nails: 4 }, once: 'sword', apply: () => { SWORD_DMG = 2; slash.material.color.setHex(0x7ff4ff); swordBladeMat.emissive.setHex(0x35e0ff); swordBladeMat.emissiveIntensity = 1.4; } },
+    { name: 'Crystal Edge', note: 'the sword hits for double damage', cost: { shards: 8, nails: 4 }, once: 'sword', apply: () => { SWORD_DMG = 2; slash.material.color.setHex(0x7ff4ff); enableSwordGlow(); } },
   ] },
 };
 const fmt = o => Object.entries(o).map(([k, v]) => `${v} ${NAMES[k][v === 1 ? 0 : 1]}`).join(' + ');
@@ -2622,7 +2639,7 @@ function startGame() {
 }
 $('newgame').addEventListener('click', startGame);
 
-window.__spookie = { startGame, menuState: () => ({ menuOpen, crafting }), colliders, SQ, BR, BRIDGE, bridge, groundY, startBuild, setSawmillRunning, inv, SAW, nodes, addItem, openCrafting, closeCrafting, setFacing: a => { facing = a; }, SAWMILL, sawyer, sawmill, streamNearest, streamPush, isCutOff, STREAM_HW, STREAM_PTS, renderer, camera, scene, lightPool, lightSrc, GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
+window.__spookie = { swordGlow, swordIntensity: () => swordBladeMat.emissiveIntensity, startGame, menuState: () => ({ menuOpen, crafting }), colliders, SQ, BR, BRIDGE, bridge, groundY, startBuild, setSawmillRunning, inv, SAW, nodes, addItem, openCrafting, closeCrafting, setFacing: a => { facing = a; }, SAWMILL, sawyer, sawmill, streamNearest, streamPush, isCutOff, STREAM_HW, STREAM_PTS, renderer, camera, scene, lightPool, lightSrc, GROVE, grove, NIGHT, raiders, damageEnemy, startVigil, vigilFail, setWheatHealth, farmer, farm, FARM, PEN, FIELD, MILL, crows, treeObjs, bunnies, updateAudio, sfx, audio, castSpell, spell, enemies, combat, attack, hurtPlayer, HOLLOW, GATE, ghosts, get slowT() { return slowT; }, pPos, QUEST, SQ, ores, souls, interact, HOUSE, switchWorld, get world() { return world; } }; // debug/test hook
 
 // ---------- loop ----------
 addEventListener('resize', () => {
